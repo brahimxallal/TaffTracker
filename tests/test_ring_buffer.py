@@ -42,7 +42,7 @@ def test_ring_buffer_round_trip() -> None:
 @pytest.mark.integration
 def test_ring_buffer_attach_in_spawned_process() -> None:
     context = mp.get_context("spawn")
-    buffer, write_index = SharedRingBuffer.create((2, 2, 3), num_slots=3)
+    buffer, write_index = SharedRingBuffer.create((2, 2, 3), num_slots=3, context=context)
     frame = np.full((2, 2, 3), 9, dtype=np.uint8)
     result_queue = context.Queue()
 

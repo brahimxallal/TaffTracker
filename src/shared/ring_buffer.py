@@ -58,6 +58,7 @@ class SharedRingBuffer:
         *,
         num_slots: int = 3,
         frame_dtype: np.dtype | type[np.generic] = np.uint8,
+        context: mp.context.BaseContext | None = None,
     ) -> tuple[Self, Synchronized]:
         dtype = np.dtype(frame_dtype)
         frame_bytes = int(np.prod(frame_shape, dtype=np.int64)) * dtype.itemsize
@@ -70,7 +71,8 @@ class SharedRingBuffer:
             frame_dtype=dtype.str,
             num_slots=num_slots,
         )
-        write_index: Synchronized = mp.Value(ctypes.c_ulonglong, 0)
+        ctx = context if context is not None else mp
+        write_index: Synchronized = ctx.Value(ctypes.c_ulonglong, 0)
         buffer = cls(layout, write_index, data_shm, meta_shm, owner=True)
         buffer._meta[:] = (0, 0, 0)
         buffer._frames[:] = 0
