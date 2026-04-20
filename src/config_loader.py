@@ -3,9 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from dataclasses import fields, replace
 from pathlib import Path
-import logging
 from typing import Any, get_args, get_type_hints
 
 import yaml
@@ -30,7 +30,6 @@ from src.config import (
     default_tracking_config,
 )
 
-
 LOGGER = logging.getLogger("config")
 
 
@@ -38,7 +37,7 @@ def load_yaml_config(config_path: Path) -> dict[str, Any]:
     """Load config.yaml and return as a dict. Returns empty dict if missing."""
     if not config_path.exists():
         return {}
-    with open(config_path, "r", encoding="utf-8") as fh:
+    with open(config_path, encoding="utf-8") as fh:
         data = yaml.safe_load(fh)
     return data if isinstance(data, dict) else {}
 
@@ -63,7 +62,9 @@ def _parse_orientation(cam_cfg: dict[str, Any]) -> Orientation:
             )
             return Orientation.LANDSCAPE_NATIVE
     if "portrait_mode" in cam_cfg:
-        return Orientation.PORTRAIT if bool(cam_cfg["portrait_mode"]) else Orientation.LANDSCAPE_NATIVE
+        return (
+            Orientation.PORTRAIT if bool(cam_cfg["portrait_mode"]) else Orientation.LANDSCAPE_NATIVE
+        )
     return Orientation.LANDSCAPE_NATIVE
 
 
@@ -205,17 +206,23 @@ def build_config_from_yaml(
     comms = CommConfig(
         channel=cli.get("comm") or comm_cfg.get("channel", "serial"),
         serial_port=cli.get("serial_port") or comm_cfg.get("serial_port", "COM4"),
-        baud_rate=cli.get("baud_rate")
-        if cli.get("baud_rate") is not None
-        else comm_cfg.get("baud_rate", 921600),
+        baud_rate=(
+            cli.get("baud_rate")
+            if cli.get("baud_rate") is not None
+            else comm_cfg.get("baud_rate", 921600)
+        ),
         udp_host=cli.get("udp_host") or comm_cfg.get("udp_host", "192.168.4.1"),
-        udp_port=cli.get("udp_port")
-        if cli.get("udp_port") is not None
-        else comm_cfg.get("udp_port", 6000),
+        udp_port=(
+            cli.get("udp_port")
+            if cli.get("udp_port") is not None
+            else comm_cfg.get("udp_port", 6000)
+        ),
         udp_redundancy=int(comm_cfg.get("udp_redundancy", 2)),
-        enabled=False
-        if cli.get("no_comm", False)
-        else (True if cli_comm_selected else comm_cfg.get("enabled", True)),
+        enabled=(
+            False
+            if cli.get("no_comm", False)
+            else (True if cli_comm_selected else comm_cfg.get("enabled", True))
+        ),
     )
 
     mdl_cfg = yaml_data.get("models", {})
@@ -283,9 +290,11 @@ def build_config_from_yaml(
         debug=debug,
         headless=cli.get("headless", False) or rt_cfg.get("headless", False),
         profile=cli.get("profile", False) or rt_cfg.get("profile", False),
-        log_file=Path(cli["log_file"])
-        if cli.get("log_file")
-        else (Path(rt_cfg["log_file"]) if rt_cfg.get("log_file") else None),
+        log_file=(
+            Path(cli["log_file"])
+            if cli.get("log_file")
+            else (Path(rt_cfg["log_file"]) if rt_cfg.get("log_file") else None)
+        ),
         log_level="DEBUG" if debug else (cli.get("log_level") or rt_cfg.get("log_level", "INFO")),
     )
 

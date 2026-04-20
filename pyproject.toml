@@ -39,10 +39,15 @@ target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "B", "UP"]
-ignore = ["E501"]  # line length handled by black
+ignore = [
+    "E501",  # line length handled by black
+    "UP042", # `class X(str, Enum)` migration deferred — affects pickling/JSON
+]
 
 [tool.ruff.lint.per-file-ignores]
 "scripts/calibrate.py" = ["E701", "E702"]
+"tests/conftest.py" = ["E402"]  # hardware stubs must be installed before imports
+"tests/test_wp_tracking_improvements.py" = ["E402"]  # multi-section test file
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

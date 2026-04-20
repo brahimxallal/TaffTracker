@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from unittest.mock import MagicMock, patch
 
-import serial as pyserial
 import pytest
+import serial as pyserial
 
 from src.output.serial_comm import SerialComm
 

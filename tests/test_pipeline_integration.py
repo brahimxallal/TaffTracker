@@ -3,10 +3,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from src.config import adapt_tracking_for_fps, TrackingConfig
+from src.config import TrackingConfig, adapt_tracking_for_fps
 from src.inference.postprocess import (
-    compute_stabilized_centroid,
     KeypointStabilizer,
+    compute_stabilized_centroid,
     parse_yolo_output,
 )
 from src.shared.pose_schema import get_pose_schema
@@ -113,12 +113,16 @@ def test_stabilized_centroid_into_adaptive_kalman() -> None:
         cx, cy = 100.0 + frame * 5.0, 200.0
         # Build a minimal detection with head keypoints
         kps = np.zeros((17, 3), dtype=np.float32)
-        kps[0] = [cx, cy, 0.9]       # nose
-        kps[1] = [cx - 2, cy, 0.8]   # l_eye
+        kps[0] = [cx, cy, 0.9]  # nose
+        kps[1] = [cx - 2, cy, 0.8]  # l_eye
         kps[2] = [cx + 2, cy, 0.85]  # r_eye
         kps[3] = [cx - 4, cy + 1, 0.7]  # l_ear
         kps[4] = [cx + 4, cy + 1, 0.7]  # r_ear
-        det = Detection(bbox=np.array([cx - 20, cy - 30, cx + 20, cy + 30], dtype=np.float32), score=0.9, keypoints=kps)
+        det = Detection(
+            bbox=np.array([cx - 20, cy - 30, cx + 20, cy + 30], dtype=np.float32),
+            score=0.9,
+            keypoints=kps,
+        )
 
         centroid = compute_stabilized_centroid(det, schema, stabilizer)
         state = kalman.update(centroid, dt=1.0 / 60.0)
@@ -202,9 +206,10 @@ def test_adaptive_config_with_fps_adaptation_pipeline() -> None:
 @pytest.mark.integration
 def test_full_pipeline_detection_to_protocol() -> None:
     """End-to-end: YOLO output → stabilized centroid → adaptive Kalman → protocol v2."""
-    from src.calibration.camera_model import CameraModel
-    from src.shared.protocol import build_state_flags, encode_packet_v2, decode_packet_v2
     from math import degrees
+
+    from src.calibration.camera_model import CameraModel
+    from src.shared.protocol import build_state_flags, decode_packet_v2, encode_packet_v2
 
     num_keypoints = 17
     schema = get_pose_schema("human")
@@ -235,14 +240,24 @@ def test_full_pipeline_detection_to_protocol() -> None:
     tilt_vel_cd = int(round(degrees(ang_vel[1]) * 100.0))
 
     flags = build_state_flags(
-        state_source="measurement", target_acquired=True,
-        confidence=0.95, velocity_magnitude_dps=0.0, is_occlusion_recovery=False,
+        state_source="measurement",
+        target_acquired=True,
+        confidence=0.95,
+        velocity_magnitude_dps=0.0,
+        is_occlusion_recovery=False,
     )
 
     packet = encode_packet_v2(
-        sequence=1, timestamp_ms=16, pan=pan_cd, tilt=tilt_cd,
-        pan_vel=pan_vel_cd, tilt_vel=tilt_vel_cd,
-        confidence=int(0.95 * 255), state=flags, quality=int(0.95 * 255), latency=10,
+        sequence=1,
+        timestamp_ms=16,
+        pan=pan_cd,
+        tilt=tilt_cd,
+        pan_vel=pan_vel_cd,
+        tilt_vel=tilt_vel_cd,
+        confidence=int(0.95 * 255),
+        state=flags,
+        quality=int(0.95 * 255),
+        latency=10,
     )
 
     decoded = decode_packet_v2(packet)

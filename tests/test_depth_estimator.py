@@ -1,4 +1,5 @@
 """Tests for depth estimation and parallax correction."""
+
 from __future__ import annotations
 
 from math import radians, tan
@@ -8,15 +9,15 @@ import pytest
 
 from src.calibration.camera_model import CameraModel
 from src.calibration.depth_estimator import (
-    DepthSmoother,
     _AVERAGE_DOG_HEIGHT_M,
     _AVERAGE_HUMAN_HEIGHT_M,
+    DepthSmoother,
     _estimate_visible_fraction,
     estimate_depth,
 )
 
-
 # ─── Fixtures ────────────────────────────────────────────────
+
 
 @pytest.fixture
 def cam() -> CameraModel:
@@ -34,6 +35,7 @@ def _make_keypoints(pairs: dict[int, tuple[float, float, float]], n: int = 17) -
 
 # ─── Depth Estimation ────────────────────────────────────────
 
+
 class TestEstimateDepth:
 
     def test_shoulder_pair_basic(self, cam: CameraModel):
@@ -45,10 +47,12 @@ class TestEstimateDepth:
         cx = 320.0
         # Place shoulders symmetrically around center
         half = pixel_span / 2.0
-        kp = _make_keypoints({
-            5: (cx - half, 200.0, 0.9),   # left_shoulder
-            6: (cx + half, 200.0, 0.9),   # right_shoulder
-        })
+        kp = _make_keypoints(
+            {
+                5: (cx - half, 200.0, 0.9),  # left_shoulder
+                6: (cx + half, 200.0, 0.9),  # right_shoulder
+            }
+        )
         result = estimate_depth(kp, fx)
         assert result is not None
         assert result.pair == (5, 6)
@@ -61,10 +65,12 @@ class TestEstimateDepth:
         pixel_span = fx * real_width / target_depth
         cx = 320.0
         half = pixel_span / 2.0
-        kp = _make_keypoints({
-            11: (cx - half, 400.0, 0.8),
-            12: (cx + half, 400.0, 0.8),
-        })
+        kp = _make_keypoints(
+            {
+                11: (cx - half, 400.0, 0.8),
+                12: (cx + half, 400.0, 0.8),
+            }
+        )
         result = estimate_depth(kp, fx)
         assert result is not None
         assert result.pair == (11, 12)
@@ -74,12 +80,14 @@ class TestEstimateDepth:
         """When multiple pairs visible, best_pair reflects the highest-weight pair."""
         fx = cam.focal_length_px
         # Shoulders at low confidence
-        kp = _make_keypoints({
-            5: (250.0, 200.0, 0.4),
-            6: (390.0, 200.0, 0.4),
-            11: (270.0, 400.0, 0.9),  # hips at high confidence
-            12: (370.0, 400.0, 0.9),
-        })
+        kp = _make_keypoints(
+            {
+                5: (250.0, 200.0, 0.4),
+                6: (390.0, 200.0, 0.4),
+                11: (270.0, 400.0, 0.9),  # hips at high confidence
+                12: (370.0, 400.0, 0.9),
+            }
+        )
         result = estimate_depth(kp, fx)
         assert result is not None
         # Multi-pair fusion: both pairs contribute, n_pairs >= 2
@@ -87,10 +95,12 @@ class TestEstimateDepth:
 
     def test_returns_none_below_confidence(self, cam: CameraModel):
         fx = cam.focal_length_px
-        kp = _make_keypoints({
-            5: (250.0, 200.0, 0.1),
-            6: (390.0, 200.0, 0.1),
-        })
+        kp = _make_keypoints(
+            {
+                5: (250.0, 200.0, 0.1),
+                6: (390.0, 200.0, 0.1),
+            }
+        )
         result = estimate_depth(kp, fx, min_confidence=0.3)
         assert result is None
 
@@ -100,10 +110,12 @@ class TestEstimateDepth:
     def test_returns_none_for_degenerate_span(self, cam: CameraModel):
         """Overlapping keypoints should not produce depth."""
         fx = cam.focal_length_px
-        kp = _make_keypoints({
-            5: (320.0, 200.0, 0.9),
-            6: (320.0, 200.0, 0.9),  # same position
-        })
+        kp = _make_keypoints(
+            {
+                5: (320.0, 200.0, 0.9),
+                6: (320.0, 200.0, 0.9),  # same position
+            }
+        )
         result = estimate_depth(kp, fx)
         assert result is None
 
@@ -112,10 +124,12 @@ class TestEstimateDepth:
         custom = {(0, 1): 0.20}  # 20cm reference (plain float, no tuple)
         target_depth = 1.5
         pixel_span = fx * 0.20 / target_depth
-        kp = _make_keypoints({
-            0: (300.0, 200.0, 0.9),
-            1: (300.0 + pixel_span, 200.0, 0.9),
-        })
+        kp = _make_keypoints(
+            {
+                0: (300.0, 200.0, 0.9),
+                1: (300.0 + pixel_span, 200.0, 0.9),
+            }
+        )
         result = estimate_depth(kp, fx, reference_spans=custom)
         assert result is not None
         assert abs(result.depth_m - target_depth) < 0.01
@@ -126,10 +140,12 @@ class TestEstimateDepth:
         custom = {(0, 1): (0.20, 0.5)}
         target_depth = 1.5
         pixel_span = fx * 0.20 / target_depth
-        kp = _make_keypoints({
-            0: (300.0, 200.0, 0.9),
-            1: (300.0 + pixel_span, 200.0, 0.9),
-        })
+        kp = _make_keypoints(
+            {
+                0: (300.0, 200.0, 0.9),
+                1: (300.0 + pixel_span, 200.0, 0.9),
+            }
+        )
         result = estimate_depth(kp, fx, reference_spans=custom)
         assert result is not None
         assert abs(result.depth_m - target_depth) < 0.01
@@ -141,6 +157,7 @@ class TestEstimateDepth:
 
 
 # ─── Multi-Pair Fusion ───────────────────────────────────────
+
 
 class TestMultiPairFusion:
 
@@ -156,12 +173,14 @@ class TestMultiPairFusion:
         s_half = fx * 0.40 / target_depth / 2.0
         h_half = fx * 0.30 / target_depth / 2.0
         t_span = fx * 0.50 / target_depth
-        kp = _make_keypoints({
-            5:  (320.0 - s_half, 200.0, 0.9),
-            6:  (320.0 + s_half, 200.0, 0.9),
-            11: (320.0 - h_half, 200.0 + t_span, 0.9),
-            12: (320.0 + h_half, 200.0 + t_span, 0.9),
-        })
+        kp = _make_keypoints(
+            {
+                5: (320.0 - s_half, 200.0, 0.9),
+                6: (320.0 + s_half, 200.0, 0.9),
+                11: (320.0 - h_half, 200.0 + t_span, 0.9),
+                12: (320.0 + h_half, 200.0 + t_span, 0.9),
+            }
+        )
         result = estimate_depth(kp, fx)
         assert result is not None
         assert result.n_pairs == 4
@@ -173,10 +192,12 @@ class TestMultiPairFusion:
         target_depth = 2.0
         pixel_span = fx * 0.40 / target_depth
         half = pixel_span / 2.0
-        kp = _make_keypoints({
-            5: (320.0 - half, 200.0, 0.9),
-            6: (320.0 + half, 200.0, 0.9),
-        })
+        kp = _make_keypoints(
+            {
+                5: (320.0 - half, 200.0, 0.9),
+                6: (320.0 + half, 200.0, 0.9),
+            }
+        )
         result = estimate_depth(kp, fx)
         assert result is not None
         assert result.n_pairs == 1
@@ -193,12 +214,14 @@ class TestMultiPairFusion:
         }
         span_a = fx * 0.40 / 2.0
         span_b = fx * 0.30 / 4.0
-        kp = _make_keypoints({
-            0: (200.0, 200.0, 0.8),
-            1: (200.0 + span_a, 200.0, 0.8),
-            2: (200.0, 300.0, 0.8),
-            3: (200.0 + span_b, 300.0, 0.8),
-        })
+        kp = _make_keypoints(
+            {
+                0: (200.0, 200.0, 0.8),
+                1: (200.0 + span_a, 200.0, 0.8),
+                2: (200.0, 300.0, 0.8),
+                3: (200.0 + span_b, 300.0, 0.8),
+            }
+        )
         result = estimate_depth(kp, fx, reference_spans=custom)
         assert result is not None
         assert result.n_pairs >= 1
@@ -209,6 +232,7 @@ class TestMultiPairFusion:
 
 
 # ─── Outlier Rejection ───────────────────────────────────────
+
 
 class TestOutlierRejection:
 
@@ -227,16 +251,18 @@ class TestOutlierRejection:
         span_b = fx * 0.30 / target_depth
         span_c = fx * 0.50 / target_depth
         span_outlier = fx * 0.20 / 20.0  # very small span → huge depth
-        kp = _make_keypoints({
-            0: (100.0, 100.0, 0.9),
-            1: (100.0 + span_a, 100.0, 0.9),
-            2: (100.0, 200.0, 0.9),
-            3: (100.0 + span_b, 200.0, 0.9),
-            4: (100.0, 300.0, 0.9),
-            7: (100.0 + span_c, 300.0, 0.9),
-            8: (100.0, 400.0, 0.9),
-            9: (100.0 + span_outlier, 400.0, 0.9),
-        })
+        kp = _make_keypoints(
+            {
+                0: (100.0, 100.0, 0.9),
+                1: (100.0 + span_a, 100.0, 0.9),
+                2: (100.0, 200.0, 0.9),
+                3: (100.0 + span_b, 200.0, 0.9),
+                4: (100.0, 300.0, 0.9),
+                7: (100.0 + span_c, 300.0, 0.9),
+                8: (100.0, 400.0, 0.9),
+                9: (100.0 + span_outlier, 400.0, 0.9),
+            }
+        )
         result = estimate_depth(kp, fx, reference_spans=custom)
         assert result is not None
         # The 20m outlier should be rejected; depth should remain ~2.0m
@@ -244,6 +270,7 @@ class TestOutlierRejection:
 
 
 # ─── Bounding Box Fallback ───────────────────────────────────
+
 
 class TestBboxFallback:
 
@@ -283,10 +310,12 @@ class TestBboxFallback:
         target_depth = 2.0
         pixel_span = fx * 0.40 / target_depth
         half = pixel_span / 2.0
-        kp = _make_keypoints({
-            5: (320.0 - half, 200.0, 0.9),
-            6: (320.0 + half, 200.0, 0.9),
-        })
+        kp = _make_keypoints(
+            {
+                5: (320.0 - half, 200.0, 0.9),
+                6: (320.0 + half, 200.0, 0.9),
+            }
+        )
         # bbox at a very different depth
         bbox = np.array([100.0, 50.0, 200.0, 600.0])
         result = estimate_depth(kp, fx, bbox=bbox)
@@ -297,6 +326,7 @@ class TestBboxFallback:
 
 # ─── Dog Keypoint Support ────────────────────────────────────
 
+
 class TestDogKeypoints:
 
     def test_dog_ear_pair_basic(self, cam: CameraModel):
@@ -305,10 +335,13 @@ class TestDogKeypoints:
         target_depth = 3.0
         pixel_span = fx * 0.12 / target_depth
         half = pixel_span / 2.0
-        kp = _make_keypoints({
-            14: (320.0 - half, 200.0, 0.9),  # left_ear_base
-            15: (320.0 + half, 200.0, 0.9),  # right_ear_base
-        }, n=24)
+        kp = _make_keypoints(
+            {
+                14: (320.0 - half, 200.0, 0.9),  # left_ear_base
+                15: (320.0 + half, 200.0, 0.9),  # right_ear_base
+            },
+            n=24,
+        )
         result = estimate_depth(kp, fx, target_kind="dog")
         assert result is not None
         assert result.pair == (14, 15)
@@ -320,10 +353,13 @@ class TestDogKeypoints:
         target_depth = 4.0
         pixel_span = fx * 0.25 / target_depth
         half = pixel_span / 2.0
-        kp = _make_keypoints({
-            2: (320.0 - half, 300.0, 0.85),  # front_left_elbow
-            8: (320.0 + half, 300.0, 0.85),  # front_right_elbow
-        }, n=24)
+        kp = _make_keypoints(
+            {
+                2: (320.0 - half, 300.0, 0.85),  # front_left_elbow
+                8: (320.0 + half, 300.0, 0.85),  # front_right_elbow
+            },
+            n=24,
+        )
         result = estimate_depth(kp, fx, target_kind="dog")
         assert result is not None
         assert result.pair == (2, 8)
@@ -335,10 +371,13 @@ class TestDogKeypoints:
         # Place human shoulder indices (5,6) with valid coords
         # For dog these are rear_left_elbow(5) and front_right_paw(6)
         # Dog spans don't include (5,6) so this pair should NOT be used
-        kp = _make_keypoints({
-            5: (250.0, 200.0, 0.9),
-            6: (390.0, 200.0, 0.9),
-        }, n=24)
+        kp = _make_keypoints(
+            {
+                5: (250.0, 200.0, 0.9),
+                6: (390.0, 200.0, 0.9),
+            },
+            n=24,
+        )
         result = estimate_depth(kp, fx, target_kind="dog")
         # Pair (5,6) is not in DOG_KEYPOINT_SPANS, so only works if (2,5) or (8,11) has data
         # With only indices 5 and 6 set, no dog pair can form → None
@@ -361,12 +400,15 @@ class TestDogKeypoints:
         target_depth = 3.0
         ear_half = fx * 0.12 / target_depth / 2.0
         elbow_half = fx * 0.25 / target_depth / 2.0
-        kp = _make_keypoints({
-            14: (320.0 - ear_half, 100.0, 0.9),
-            15: (320.0 + ear_half, 100.0, 0.9),
-            2: (320.0 - elbow_half, 250.0, 0.8),
-            8: (320.0 + elbow_half, 250.0, 0.8),
-        }, n=24)
+        kp = _make_keypoints(
+            {
+                14: (320.0 - ear_half, 100.0, 0.9),
+                15: (320.0 + ear_half, 100.0, 0.9),
+                2: (320.0 - elbow_half, 250.0, 0.8),
+                8: (320.0 + elbow_half, 250.0, 0.8),
+            },
+            n=24,
+        )
         result = estimate_depth(kp, fx, target_kind="dog")
         assert result is not None
         assert result.n_pairs >= 2
@@ -374,6 +416,7 @@ class TestDogKeypoints:
 
 
 # ─── Depth Range Clamping ────────────────────────────────────
+
 
 class TestDepthRangeClamping:
 
@@ -383,10 +426,12 @@ class TestDepthRangeClamping:
         # Set up shoulder pair giving depth = 0.1m
         pixel_span = fx * 0.40 / 0.1  # very large span
         half = pixel_span / 2.0
-        kp = _make_keypoints({
-            5: (320.0 - half, 200.0, 0.9),
-            6: (320.0 + half, 200.0, 0.9),
-        })
+        kp = _make_keypoints(
+            {
+                5: (320.0 - half, 200.0, 0.9),
+                6: (320.0 + half, 200.0, 0.9),
+            }
+        )
         result = estimate_depth(kp, fx)
         assert result is None
 
@@ -396,10 +441,12 @@ class TestDepthRangeClamping:
         # Set up shoulder pair giving depth = 50m
         pixel_span = fx * 0.40 / 50.0  # very small span
         half = pixel_span / 2.0
-        kp = _make_keypoints({
-            5: (320.0 - half, 200.0, 0.9),
-            6: (320.0 + half, 200.0, 0.9),
-        })
+        kp = _make_keypoints(
+            {
+                5: (320.0 - half, 200.0, 0.9),
+                6: (320.0 + half, 200.0, 0.9),
+            }
+        )
         result = estimate_depth(kp, fx)
         assert result is None
 
@@ -409,10 +456,12 @@ class TestDepthRangeClamping:
         target_depth = 5.0
         pixel_span = fx * 0.40 / target_depth
         half = pixel_span / 2.0
-        kp = _make_keypoints({
-            5: (320.0 - half, 200.0, 0.9),
-            6: (320.0 + half, 200.0, 0.9),
-        })
+        kp = _make_keypoints(
+            {
+                5: (320.0 - half, 200.0, 0.9),
+                6: (320.0 + half, 200.0, 0.9),
+            }
+        )
         result = estimate_depth(kp, fx)
         assert result is not None
         assert abs(result.depth_m - target_depth) < 0.1
@@ -429,6 +478,7 @@ class TestDepthRangeClamping:
 
 # ─── Nonlinear Confidence Weighting ──────────────────────────
 
+
 class TestNonlinearWeighting:
 
     def test_low_conf_pair_downweighted(self, cam: CameraModel):
@@ -440,12 +490,14 @@ class TestNonlinearWeighting:
         custom = {(0, 1): (0.40, 1.0), (2, 3): (0.40, 1.0)}
         span_a = fx * 0.40 / 2.0
         span_b = fx * 0.40 / 4.0
-        kp = _make_keypoints({
-            0: (200.0, 200.0, 0.9),
-            1: (200.0 + span_a, 200.0, 0.9),
-            2: (200.0, 300.0, 0.4),
-            3: (200.0 + span_b, 300.0, 0.4),
-        })
+        kp = _make_keypoints(
+            {
+                0: (200.0, 200.0, 0.9),
+                1: (200.0 + span_a, 200.0, 0.9),
+                2: (200.0, 300.0, 0.4),
+                3: (200.0 + span_b, 300.0, 0.4),
+            }
+        )
         result = estimate_depth(kp, fx, reference_spans=custom)
         assert result is not None
         # With quadratic weighting, depth should be closer to 2.0 than 3.0
@@ -453,6 +505,7 @@ class TestNonlinearWeighting:
 
 
 # ─── Orientation Compensation ────────────────────────────────
+
 
 class TestOrientationCompensation:
 
@@ -465,11 +518,13 @@ class TestOrientationCompensation:
         # Shoulder pair (5,6) compressed by rotation → reports larger depth (5m)
         shoulder_span = fx * 0.40 / 5.0
         s_half = shoulder_span / 2.0
-        kp = _make_keypoints({
-            5: (320.0 - s_half, 200.0, 0.9),
-            6: (320.0 + s_half, 200.0, 0.9),
-            11: (320.0 - s_half, 200.0 + diag_span, 0.9),
-        })
+        kp = _make_keypoints(
+            {
+                5: (320.0 - s_half, 200.0, 0.9),
+                6: (320.0 + s_half, 200.0, 0.9),
+                11: (320.0 - s_half, 200.0 + diag_span, 0.9),
+            }
+        )
         result = estimate_depth(kp, fx)
         assert result is not None
         # With orientation compensation, fused depth should be closer to 3.0 than 5.0
@@ -481,11 +536,13 @@ class TestOrientationCompensation:
         target_depth = 2.5
         s_half = fx * 0.40 / target_depth / 2.0
         t_span = fx * 0.50 / target_depth
-        kp = _make_keypoints({
-            5:  (320.0 - s_half, 200.0, 0.9),
-            6:  (320.0 + s_half, 200.0, 0.9),
-            11: (320.0 - s_half, 200.0 + t_span, 0.9),
-        })
+        kp = _make_keypoints(
+            {
+                5: (320.0 - s_half, 200.0, 0.9),
+                6: (320.0 + s_half, 200.0, 0.9),
+                11: (320.0 - s_half, 200.0 + t_span, 0.9),
+            }
+        )
         result = estimate_depth(kp, fx)
         assert result is not None
         assert abs(result.depth_m - target_depth) < 0.2
@@ -498,12 +555,15 @@ class TestOrientationCompensation:
         ear_half = ear_span / 2.0
         # Place body length pair at correct 3m
         body_span = fx * 0.45 / 3.0
-        kp = _make_keypoints({
-            14: (320.0 - ear_half, 100.0, 0.9),
-            15: (320.0 + ear_half, 100.0, 0.9),
-            2:  (320.0, 200.0, 0.9),
-            5:  (320.0, 200.0 + body_span, 0.9),
-        }, n=24)
+        kp = _make_keypoints(
+            {
+                14: (320.0 - ear_half, 100.0, 0.9),
+                15: (320.0 + ear_half, 100.0, 0.9),
+                2: (320.0, 200.0, 0.9),
+                5: (320.0, 200.0 + body_span, 0.9),
+            },
+            n=24,
+        )
         # For dog, both pairs should contribute without orientation penalty
         result = estimate_depth(kp, fx, target_kind="dog")
         assert result is not None
@@ -512,44 +572,53 @@ class TestOrientationCompensation:
 
 # ─── Partial Body Bbox Correction ────────────────────────────
 
+
 class TestPartialBodyBbox:
 
     def test_waist_crop_reduces_effective_height(self, cam: CameraModel):
         """Shoulders visible but ankles/knees missing → fraction ≈ 0.55."""
-        fx = cam.focal_length_px
         # Create keypoints with only shoulders visible (confidence 0.9)
-        kp = _make_keypoints({
-            5: (250.0, 200.0, 0.9),
-            6: (390.0, 200.0, 0.9),
-        })
+        kp = _make_keypoints(
+            {
+                5: (250.0, 200.0, 0.9),
+                6: (390.0, 200.0, 0.9),
+            }
+        )
         frac = _estimate_visible_fraction(kp, "human")
         assert abs(frac - 0.55) < 0.01
 
     def test_shin_crop_fraction(self, cam: CameraModel):
         """Shoulders + knees visible but ankles missing → fraction ≈ 0.85."""
-        kp = _make_keypoints({
-            5: (250.0, 200.0, 0.9),
-            6: (390.0, 200.0, 0.9),
-            13: (270.0, 400.0, 0.9),  # left knee
-        })
+        kp = _make_keypoints(
+            {
+                5: (250.0, 200.0, 0.9),
+                6: (390.0, 200.0, 0.9),
+                13: (270.0, 400.0, 0.9),  # left knee
+            }
+        )
         frac = _estimate_visible_fraction(kp, "human")
         assert abs(frac - 0.85) < 0.01
 
     def test_full_body_fraction(self, cam: CameraModel):
         """Full body visible (ankles present) → fraction = 1.0."""
-        kp = _make_keypoints({
-            5: (250.0, 200.0, 0.9),
-            6: (390.0, 200.0, 0.9),
-            15: (270.0, 500.0, 0.9),  # left ankle
-        })
+        kp = _make_keypoints(
+            {
+                5: (250.0, 200.0, 0.9),
+                6: (390.0, 200.0, 0.9),
+                15: (270.0, 500.0, 0.9),  # left ankle
+            }
+        )
         frac = _estimate_visible_fraction(kp, "human")
         assert frac == 1.0
 
     def test_dog_paw_crop_fraction(self, cam: CameraModel):
         """Dog with elbows but no paws → fraction ≈ 0.85."""
-        kp = _make_keypoints({
-            2: (200.0, 200.0, 0.9),  # front_left_elbow
-        }, n=24)
+        kp = _make_keypoints(
+            {
+                2: (200.0, 200.0, 0.9),  # front_left_elbow
+            },
+            n=24,
+        )
         frac = _estimate_visible_fraction(kp, "dog")
         assert abs(frac - 0.85) < 0.01
 
@@ -559,14 +628,15 @@ class TestPartialBodyBbox:
         # Bbox showing upper body only.  With full height 1.70m the depth would be X.
         # With fraction=0.55 the effective height is 0.935m, so depth is shallower.
         bbox_h = 200.0  # pixels
-        full_depth = fx * _AVERAGE_HUMAN_HEIGHT_M / bbox_h
         partial_depth = fx * (_AVERAGE_HUMAN_HEIGHT_M * 0.55) / bbox_h
 
         # Keypoints: only shoulders, no ankles/knees → fraction=0.55
-        kp = _make_keypoints({
-            5: (250.0, 200.0, 0.9),
-            6: (390.0, 200.0, 0.9),
-        })
+        kp = _make_keypoints(
+            {
+                5: (250.0, 200.0, 0.9),
+                6: (390.0, 200.0, 0.9),
+            }
+        )
         # Shoulders visible means keypoint pairs work, so bbox isn't used unless
         # the shoulder pair pixel distance gives a depth outside range.
         # Force no valid keypoint pairs by setting min_confidence very high
@@ -579,13 +649,14 @@ class TestPartialBodyBbox:
 
 # ─── Innovation Gate on DepthSmoother ─────────────────────────
 
+
 class TestInnovationGate:
 
     def test_spike_rejected(self):
         """A 4× depth jump from smoothed value should be rejected."""
         s = DepthSmoother(alpha=0.3, max_stale_frames=10)
-        s.update(3.0)   # initialize
-        s.update(3.1)   # normal update
+        s.update(3.0)  # initialize
+        s.update(3.1)  # normal update
         smoothed_before = s.update(None)  # get current smoothed
         s.restore(s.snapshot())  # undo the None
         # Now send a 4× spike
@@ -625,6 +696,7 @@ class TestInnovationGate:
 
 
 # ─── Depth Smoother ──────────────────────────────────────────
+
 
 class TestDepthSmoother:
 
@@ -686,6 +758,7 @@ class TestDepthSmoother:
 
 
 # ─── CameraModel Parallax ────────────────────────────────────
+
 
 class TestPixelToAngleWithParallax:
 

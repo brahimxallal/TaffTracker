@@ -61,7 +61,6 @@ def test_ring_buffer_attach_in_spawned_process() -> None:
         buffer.cleanup()
 
 
-
 @pytest.mark.unit
 def test_ring_buffer_reads_specific_frame_before_overwrite() -> None:
     buffer, _ = SharedRingBuffer.create((2, 2, 3), num_slots=3)

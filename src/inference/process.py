@@ -1,18 +1,15 @@
 from __future__ import annotations
 
-from collections import deque
-import json
-from math import radians
-from multiprocessing.sharedctypes import Synchronized
-from queue import Empty, Full
 import gc
+import json
 import logging
 import multiprocessing as mp
 import time
+from collections import deque
+from multiprocessing.sharedctypes import Synchronized
+from queue import Empty, Full
 from time import perf_counter_ns
 from traceback import format_exc
-
-import numpy as np
 
 from src.calibration.camera_model import CameraModel
 from src.calibration.depth_estimator import DepthSmoother
@@ -37,8 +34,8 @@ from src.inference.stages.centroid import CentroidStage
 from src.inference.stages.servo import ServoStage
 from src.inference.stages.tracker import TrackerStage
 from src.inference.trt_engine import TRTEngine
-from src.shared.profiler import StageProfiler
 from src.shared.pose_schema import PoseSchema, get_pose_schema
+from src.shared.profiler import StageProfiler
 from src.shared.ring_buffer import RingBufferLayout, SharedRingBuffer
 from src.shared.types import ProcessErrorReport, TrackingMessage
 from src.tracking.adaptive import AdaptiveController
@@ -46,7 +43,6 @@ from src.tracking.botsort import BoTSORT
 from src.tracking.kalman import KalmanFilter
 from src.tracking.reid import ReIDBuffer
 from src.tracking.visual_servo import VisualServoController
-
 
 LOGGER = logging.getLogger("inference")
 
@@ -178,7 +174,9 @@ class InferenceProcess(mp.Process):
         if parallax_active:
             LOGGER.info(
                 "Parallax correction enabled: offset=(%.3f, %.3f, %.3f)m",
-                mo.x_m, mo.y_m, mo.z_m,
+                mo.x_m,
+                mo.y_m,
+                mo.z_m,
             )
 
         # Laser + visual servo
@@ -186,6 +184,7 @@ class InferenceProcess(mp.Process):
         servo_controller = None
         if self._laser_config is not None and self._laser_config.enabled:
             from src.laser.detector import LaserDetector
+
             laser_detector = LaserDetector(self._laser_config)
             LOGGER.info(
                 "Laser detector enabled (HSV red, ROI=%.0fpx)", self._laser_config.roi_radius_px
@@ -193,28 +192,39 @@ class InferenceProcess(mp.Process):
 
         vs_cfg = self._visual_servo_config
         if vs_cfg is not None and vs_cfg.enabled and laser_detector is not None:
-            from math import degrees as _deg, atan2 as _atan2
+            from math import atan2 as _atan2
+            from math import degrees as _deg
+
             fx, fy = camera_model.focal_lengths_px
             dpx = _deg(_atan2(1.0, fx))
             dpy = _deg(_atan2(1.0, fy))
             servo_controller = VisualServoController(
-                kp=vs_cfg.kp, ki=vs_cfg.ki, kd=vs_cfg.kd,
+                kp=vs_cfg.kp,
+                ki=vs_cfg.ki,
+                kd=vs_cfg.kd,
                 integral_limit_deg=vs_cfg.integral_limit_deg,
                 max_correction_deg=vs_cfg.max_correction_deg,
                 entry_threshold_frames=vs_cfg.entry_threshold_frames,
                 exit_threshold_frames=vs_cfg.exit_threshold_frames,
                 association_radius_px=vs_cfg.association_radius_px,
-                deg_per_pixel_x=dpx, deg_per_pixel_y=dpy,
+                deg_per_pixel_x=dpx,
+                deg_per_pixel_y=dpy,
             )
             LOGGER.info(
                 "Visual servo enabled (kp=%.2f, ki=%.2f, kd=%.2f, dpx=%.4f deg/px)",
-                vs_cfg.kp, vs_cfg.ki, vs_cfg.kd, dpx,
+                vs_cfg.kp,
+                vs_cfg.ki,
+                vs_cfg.kd,
+                dpx,
             )
 
         # ── Assemble stages and pipeline ──
         tracker_stage = TrackerStage(
-            tracker=tracker, kalman=kalman, stabilizer=stabilizer,
-            reid_buffer=reid_buffer, max_lost_frames=self._tracking_config.max_lost_frames,
+            tracker=tracker,
+            kalman=kalman,
+            stabilizer=stabilizer,
+            reid_buffer=reid_buffer,
+            max_lost_frames=self._tracking_config.max_lost_frames,
         )
         centroid_stage = CentroidStage(
             camera_model=camera_model,
@@ -248,9 +258,12 @@ class InferenceProcess(mp.Process):
         prev_locked_bbox: tuple[float, ...] | None = None
 
         from src.capture.preflight import FrameHealthMonitor
+
         health_monitor = FrameHealthMonitor(self._preflight_config)
         if self._preflight_config.enabled:
-            LOGGER.info("Preflight health monitor enabled (window=%d)", self._preflight_config.window_size)
+            LOGGER.info(
+                "Preflight health monitor enabled (window=%d)", self._preflight_config.window_size
+            )
 
         frame_drop_count = 0
         frame_total_count = 0
@@ -271,8 +284,10 @@ class InferenceProcess(mp.Process):
                     if self._capture_done_event.is_set():
                         break
                     if (perf_counter_ns() - _last_frame_received_ns) > _FRAME_TIMEOUT_NS:
-                        LOGGER.warning("No frame received for %.1f ms — capture may be stalled",
-                                       _FRAME_TIMEOUT_NS / 1_000_000.0)
+                        LOGGER.warning(
+                            "No frame received for %.1f ms — capture may be stalled",
+                            _FRAME_TIMEOUT_NS / 1_000_000.0,
+                        )
                         if self._capture_done_event.wait(timeout=1.0):
                             break
                         _last_frame_received_ns = perf_counter_ns()
@@ -305,7 +320,9 @@ class InferenceProcess(mp.Process):
                 dt = self._compute_dt(record.timestamp_ns, last_timestamp_ns)
                 last_timestamp_ns = record.timestamp_ns
                 centroid_stage.update_commanded_camera_motion(
-                    record.timestamp_ns, self._command_pan, self._command_tilt,
+                    record.timestamp_ns,
+                    self._command_pan,
+                    self._command_tilt,
                 )
 
                 # Check relock signal
@@ -485,7 +502,9 @@ class InferenceProcess(mp.Process):
             except Full:
                 pass
 
-    def _log_profiler_summary(self, profiler: StageProfiler, pipeline: TrackingPipeline, fps: float) -> None:
+    def _log_profiler_summary(
+        self, profiler: StageProfiler, pipeline: TrackingPipeline, fps: float
+    ) -> None:
         wait_stats = profiler.get_percentiles("wait")
         inference_stats = profiler.get_percentiles("inference")
         postprocess_stats = profiler.get_percentiles("postprocess")
@@ -509,7 +528,9 @@ class InferenceProcess(mp.Process):
                 f"total p50/p95/p99 {total_stats[0]:.1f}/{total_stats[1]:.1f}/{total_stats[2]:.1f} ms"
             )
         if pipeline.measurement_update_count > 0:
-            gate_pct = (pipeline.measurement_gated_count / pipeline.measurement_update_count) * 100.0
+            gate_pct = (
+                pipeline.measurement_gated_count / pipeline.measurement_update_count
+            ) * 100.0
             segments.append(f"gate_reject {gate_pct:.1f}%")
         if self._publish_drop_count > 0:
             segments.append(f"publish_drops {self._publish_drop_count}")

@@ -1,4 +1,5 @@
 """Phase A: Configuration consolidation tests."""
+
 from __future__ import annotations
 
 from dataclasses import replace
@@ -18,7 +19,6 @@ from src.config import (
     adapt_tracking_for_fps,
     default_tracking_config,
 )
-
 
 # --- PostprocessConfig defaults match former hardcoded constants ---
 
@@ -215,7 +215,9 @@ def test_pipeline_config_carries_gimbal() -> None:
 @pytest.mark.unit
 def test_pipeline_config_custom_gimbal() -> None:
     cfg = PipelineConfig(
-        mode="camera", target="human", source="0",
+        mode="camera",
+        target="human",
+        source="0",
         gimbal=GimbalConfig(invert_tilt=True),
     )
     assert cfg.gimbal.invert_tilt is True

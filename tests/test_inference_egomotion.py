@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from src.calibration.camera_model import CameraModel
-from src.config import CameraConfig, MountOffsetConfig, TrackingConfig
+from src.config import MountOffsetConfig, TrackingConfig
 from src.inference.stages.centroid import CentroidStage
 from src.shared.types import Track
 
@@ -71,7 +71,6 @@ def test_compensate_measurement_for_egomotion_skips_stale_velocity_sample() -> N
 
 @pytest.mark.unit
 def test_build_message_reports_egomotion_applied_px_and_limits_false_velocity() -> None:
-    from src.calibration.depth_estimator import DepthSmoother
     from src.config import MountOffsetConfig
     from src.inference.pipeline import TrackingPipeline
     from src.inference.postprocess import KeypointStabilizer
@@ -95,11 +94,16 @@ def test_build_message_reports_egomotion_applied_px_and_limits_false_velocity() 
     command_tilt = mp.Value("d", 0.0)
 
     tracker_stage = TrackerStage(
-        tracker=BoTSORT(), kalman=kalman, stabilizer=stabilizer,
-        reid_buffer=ReIDBuffer(), max_lost_frames=30,
+        tracker=BoTSORT(),
+        kalman=kalman,
+        stabilizer=stabilizer,
+        reid_buffer=ReIDBuffer(),
+        max_lost_frames=30,
     )
     centroid_stage = CentroidStage(
-        camera_model=camera_model, mount_offset=MountOffsetConfig(), target="human",
+        camera_model=camera_model,
+        mount_offset=MountOffsetConfig(),
+        target="human",
     )
     servo_stage = ServoStage()
     ema_pixel = OneEuroFilter2D(mincutoff=0.1, beta=0.05, dcutoff=1.0)
@@ -108,25 +112,43 @@ def test_build_message_reports_egomotion_applied_px_and_limits_false_velocity() 
     adaptive = AdaptiveController(tracking_config)
 
     pipeline = TrackingPipeline(
-        tracker_stage=tracker_stage, centroid_stage=centroid_stage,
-        servo_stage=servo_stage, adaptive=adaptive,
-        tracking_config=tracking_config, pose_schema=pose_schema,
-        ema_pixel=ema_pixel, servo_ema_pixel=servo_ema_pixel,
-        flow_refiner=flow_refiner, flow_enabled=False, depth_smoother=None,
+        tracker_stage=tracker_stage,
+        centroid_stage=centroid_stage,
+        servo_stage=servo_stage,
+        adaptive=adaptive,
+        tracking_config=tracking_config,
+        pose_schema=pose_schema,
+        ema_pixel=ema_pixel,
+        servo_ema_pixel=servo_ema_pixel,
+        flow_refiner=flow_refiner,
+        flow_enabled=False,
+        depth_smoother=None,
     )
 
     dt = 1.0 / 60.0
     track0 = _make_track(320.0, 320.0)
     track1 = _make_track(315.0, 320.0)
-    record0 = SimpleNamespace(frame_id=0, timestamp_ns=1_000_000_000, frame=np.zeros((640, 640, 3), dtype=np.uint8))
-    record1 = SimpleNamespace(frame_id=1, timestamp_ns=1_016_666_667, frame=np.zeros((640, 640, 3), dtype=np.uint8))
+    record0 = SimpleNamespace(
+        frame_id=0, timestamp_ns=1_000_000_000, frame=np.zeros((640, 640, 3), dtype=np.uint8)
+    )
+    record1 = SimpleNamespace(
+        frame_id=1, timestamp_ns=1_016_666_667, frame=np.zeros((640, 640, 3), dtype=np.uint8)
+    )
 
     centroid_stage.update_commanded_camera_motion(record0.timestamp_ns, command_pan, command_tilt)
 
     message0, was_lost0, _, _ = pipeline.process_frame(
-        record=record0, undistorted=record0.frame, tracks=[track0],
-        prev_locked_id=None, was_lost=False, dt=dt, fps=60.0,
-        wait_ms=0.0, inference_ms=0.0, postprocess_ms=0.0, flow_active=False,
+        record=record0,
+        undistorted=record0.frame,
+        tracks=[track0],
+        prev_locked_id=None,
+        was_lost=False,
+        dt=dt,
+        fps=60.0,
+        wait_ms=0.0,
+        inference_ms=0.0,
+        postprocess_ms=0.0,
+        flow_active=False,
     )
     assert was_lost0 is False
 
@@ -134,9 +156,17 @@ def test_build_message_reports_egomotion_applied_px_and_limits_false_velocity() 
     centroid_stage.update_commanded_camera_motion(record1.timestamp_ns, command_pan, command_tilt)
 
     message1, _, _, _ = pipeline.process_frame(
-        record=record1, undistorted=record1.frame, tracks=[track1],
-        prev_locked_id=tracker_stage.locked_track_id, was_lost=False, dt=dt, fps=60.0,
-        wait_ms=0.0, inference_ms=0.0, postprocess_ms=0.0, flow_active=False,
+        record=record1,
+        undistorted=record1.frame,
+        tracks=[track1],
+        prev_locked_id=tracker_stage.locked_track_id,
+        was_lost=False,
+        dt=dt,
+        fps=60.0,
+        wait_ms=0.0,
+        inference_ms=0.0,
+        postprocess_ms=0.0,
+        flow_active=False,
     )
 
     assert message0.egomotion_applied_px is None

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import multiprocessing as mp
-from pathlib import Path
-from queue import Empty, Queue
 import signal
 import sys
+from pathlib import Path
+from queue import Empty, Queue
 
 import pytest
 

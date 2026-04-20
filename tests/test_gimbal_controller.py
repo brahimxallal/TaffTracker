@@ -13,7 +13,6 @@ from src.shared.protocol import decode_packet_v2
 from src.shared.ring_buffer import SharedRingBuffer
 from src.shared.types import TrackingMessage
 
-
 _TS_BASE = 1_000_000_000
 _TS_STEP = 18_181_818  # ~55 fps
 
@@ -43,10 +42,14 @@ def _msg(**overrides) -> TrackingMessage:
 def _make_proc(**gimbal_kw):
     layout, write_index = SharedRingBuffer.create((480, 640, 3), num_slots=2)
     defaults = dict(
-        invert_pan=False, invert_tilt=False,
-        pan_limit_deg=90.0, tilt_limit_deg=90.0,
-        kd=0.0, deadband_deg=0.0,
-        integral_decay_rate=0.0, slew_limit_dps=1000.0,
+        invert_pan=False,
+        invert_tilt=False,
+        pan_limit_deg=90.0,
+        tilt_limit_deg=90.0,
+        kd=0.0,
+        deadband_deg=0.0,
+        integral_decay_rate=0.0,
+        slew_limit_dps=1000.0,
         tilt_scale=1.0,
     )
     defaults.update(gimbal_kw)
@@ -72,10 +75,16 @@ def _make_proc(**gimbal_kw):
 def test_kp_far_vs_near():
     """Large error uses kp_far; small error uses kp_near — outputs differ."""
     proc_far, layout_far = _make_proc(
-        kp=2.0, kp_far=8.0, kp_near=1.0, gain_schedule_threshold_deg=5.0,
+        kp=2.0,
+        kp_far=8.0,
+        kp_near=1.0,
+        gain_schedule_threshold_deg=5.0,
     )
     proc_near, layout_near = _make_proc(
-        kp=2.0, kp_far=8.0, kp_near=1.0, gain_schedule_threshold_deg=5.0,
+        kp=2.0,
+        kp_far=8.0,
+        kp_near=1.0,
+        gain_schedule_threshold_deg=5.0,
     )
     try:
         # 10° error → above threshold → kp_far=8.0
@@ -87,9 +96,9 @@ def test_kp_far_vs_near():
         d_near = decode_packet_v2(proc_near._encode_packet(msg_near, 0))
 
         # far output should be much larger than near (8×10 vs 1×2 rates)
-        assert d_far.pan > d_near.pan * 5, (
-            f"kp_far branch not active: far={d_far.pan}, near={d_near.pan}"
-        )
+        assert (
+            d_far.pan > d_near.pan * 5
+        ), f"kp_far branch not active: far={d_far.pan}, near={d_near.pan}"
     finally:
         layout_far.cleanup()
         layout_near.cleanup()
@@ -99,7 +108,10 @@ def test_kp_far_vs_near():
 def test_kp_far_near_equal_matches_flat_kp():
     """When kp_far == kp_near, output matches a flat-kp controller."""
     proc_sched, layout_sched = _make_proc(
-        kp=4.0, kp_far=4.0, kp_near=4.0, gain_schedule_threshold_deg=5.0,
+        kp=4.0,
+        kp_far=4.0,
+        kp_near=4.0,
+        gain_schedule_threshold_deg=5.0,
     )
     proc_flat, layout_flat = _make_proc(kp=4.0)
     try:
@@ -119,10 +131,12 @@ def test_kp_far_near_equal_matches_flat_kp():
 def test_velocity_feedforward_zero_is_noop():
     """ff_gain=0 produces identical output to controller without feedforward."""
     proc_ff0, layout0 = _make_proc(
-        kp=4.0, velocity_feedforward_gain=0.0,
+        kp=4.0,
+        velocity_feedforward_gain=0.0,
     )
     proc_ff1, layout1 = _make_proc(
-        kp=4.0, velocity_feedforward_gain=0.0,
+        kp=4.0,
+        velocity_feedforward_gain=0.0,
     )
     try:
         msg = _msg(
@@ -141,10 +155,12 @@ def test_velocity_feedforward_zero_is_noop():
 def test_velocity_feedforward_increases_command():
     """Positive ff_gain + positive velocity increases pan command vs ff_gain=0."""
     proc_no_ff, layout0 = _make_proc(
-        kp=4.0, velocity_feedforward_gain=0.0,
+        kp=4.0,
+        velocity_feedforward_gain=0.0,
     )
     proc_with_ff, layout1 = _make_proc(
-        kp=4.0, velocity_feedforward_gain=0.5,
+        kp=4.0,
+        velocity_feedforward_gain=0.5,
     )
     try:
         msg = _msg(
@@ -153,9 +169,9 @@ def test_velocity_feedforward_increases_command():
         )
         d_no = decode_packet_v2(proc_no_ff._encode_packet(msg, 0))
         d_yes = decode_packet_v2(proc_with_ff._encode_packet(msg, 0))
-        assert d_yes.pan > d_no.pan, (
-            f"Feedforward did not increase command: ff={d_yes.pan}, no_ff={d_no.pan}"
-        )
+        assert (
+            d_yes.pan > d_no.pan
+        ), f"Feedforward did not increase command: ff={d_yes.pan}, no_ff={d_no.pan}"
     finally:
         layout0.cleanup()
         layout1.cleanup()
@@ -168,10 +184,14 @@ def test_velocity_feedforward_increases_command():
 def test_predictive_lead_gated_by_speed():
     """Lead is zero when target speed < 30°/s; active when speed > 30°/s."""
     proc_slow, layout_slow = _make_proc(
-        kp=4.0, predictive_lead_s=0.08, velocity_feedforward_gain=0.0,
+        kp=4.0,
+        predictive_lead_s=0.08,
+        velocity_feedforward_gain=0.0,
     )
     proc_nolead, layout_nolead = _make_proc(
-        kp=4.0, predictive_lead_s=0.0, velocity_feedforward_gain=0.0,
+        kp=4.0,
+        predictive_lead_s=0.0,
+        velocity_feedforward_gain=0.0,
     )
     try:
         # Low speed (10°/s) — lead should be inactive, same as no-lead
@@ -182,9 +202,9 @@ def test_predictive_lead_gated_by_speed():
         )
         d_slow_lead = decode_packet_v2(proc_slow._encode_packet(msg_slow, 0))
         d_slow_no = decode_packet_v2(proc_nolead._encode_packet(msg_slow, 0))
-        assert d_slow_lead.pan == d_slow_no.pan, (
-            f"Lead active at low speed: lead={d_slow_lead.pan}, no_lead={d_slow_no.pan}"
-        )
+        assert (
+            d_slow_lead.pan == d_slow_no.pan
+        ), f"Lead active at low speed: lead={d_slow_lead.pan}, no_lead={d_slow_no.pan}"
     finally:
         layout_slow.cleanup()
         layout_nolead.cleanup()
@@ -194,10 +214,14 @@ def test_predictive_lead_gated_by_speed():
 def test_predictive_lead_active_at_high_speed():
     """Lead > 0 when speed > 30°/s shifts the effective error."""
     proc_lead, layout_lead = _make_proc(
-        kp=4.0, predictive_lead_s=0.08, velocity_feedforward_gain=0.0,
+        kp=4.0,
+        predictive_lead_s=0.08,
+        velocity_feedforward_gain=0.0,
     )
     proc_nolead, layout_nolead = _make_proc(
-        kp=4.0, predictive_lead_s=0.0, velocity_feedforward_gain=0.0,
+        kp=4.0,
+        predictive_lead_s=0.0,
+        velocity_feedforward_gain=0.0,
     )
     try:
         fast_vel = math.radians(60.0)  # 60°/s > 30°/s threshold
@@ -208,9 +232,9 @@ def test_predictive_lead_active_at_high_speed():
         d_lead = decode_packet_v2(proc_lead._encode_packet(msg, 0))
         d_no = decode_packet_v2(proc_nolead._encode_packet(msg, 0))
         # Lead adds velocity × 0.08s to error → larger command
-        assert d_lead.pan != d_no.pan, (
-            f"Lead had no effect at high speed: lead={d_lead.pan}, no_lead={d_no.pan}"
-        )
+        assert (
+            d_lead.pan != d_no.pan
+        ), f"Lead had no effect at high speed: lead={d_lead.pan}, no_lead={d_no.pan}"
     finally:
         layout_lead.cleanup()
         layout_nolead.cleanup()

@@ -14,10 +14,10 @@ instantly.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Callable
 
 from src.calibration.laser_boresight import LaserBoresight, save_boresight
 

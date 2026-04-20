@@ -1,4 +1,5 @@
 """Phase 4: Detection Stability L1 tests — MAD outlier, stabilized centroid, temporal smoothing."""
+
 from __future__ import annotations
 
 import numpy as np
@@ -11,7 +12,6 @@ from src.inference.postprocess import (
 )
 from src.shared.pose_schema import get_pose_schema
 from src.shared.types import Detection
-
 
 # --- MAD filter tests ---
 
@@ -166,11 +166,11 @@ def test_stabilized_centroid_matches_original_without_outliers() -> None:
     pose_schema = get_pose_schema("human")
     # 5 head keypoints at consistent positions
     kps = [(0, 0, 0)] * 17
-    kps[0] = (52.0, 58.0, 1.0)   # nose
-    kps[1] = (50.0, 58.0, 1.0)   # l_eye
-    kps[2] = (54.0, 58.0, 1.0)   # r_eye
-    kps[3] = (48.0, 59.0, 1.0)   # l_ear
-    kps[4] = (56.0, 59.0, 1.0)   # r_ear
+    kps[0] = (52.0, 58.0, 1.0)  # nose
+    kps[1] = (50.0, 58.0, 1.0)  # l_eye
+    kps[2] = (54.0, 58.0, 1.0)  # r_eye
+    kps[3] = (48.0, 59.0, 1.0)  # l_ear
+    kps[4] = (56.0, 59.0, 1.0)  # r_ear
     det = _make_detection_with_keypoints(kps, bbox=(40, 50, 60, 70))
 
     centroid = compute_stabilized_centroid(det, pose_schema)

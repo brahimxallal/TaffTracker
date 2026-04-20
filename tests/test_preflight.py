@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from unittest.mock import patch
 
 import numpy as np
@@ -102,7 +101,6 @@ def test_cooldown_prevents_spam() -> None:
 
     # Generate warning-triggering frames with controlled time
     warn_count = 0
-    call_count = [0]
     base_time = 1000.0  # start at a high base time
 
     def fake_monotonic() -> float:

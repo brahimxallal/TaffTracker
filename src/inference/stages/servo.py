@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from math import radians
 
-from src.tracking.visual_servo import VisualServoController, ServoMode
+from src.tracking.visual_servo import ServoMode, VisualServoController
 
 LOGGER = logging.getLogger("inference.servo")
 

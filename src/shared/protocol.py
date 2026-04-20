@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import struct
-
+from dataclasses import dataclass
 
 # --- Protocol v2 (21 bytes, header 0xBB) ---
 

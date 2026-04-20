@@ -85,6 +85,7 @@ class CentroidStage:
             return
 
         from math import radians
+
         pan_rad = radians(float(command_pan.value))
         tilt_rad = radians(float(command_tilt.value))
         if (
@@ -138,7 +139,12 @@ class CentroidStage:
         mo = self._mount_offset
         if depth_m is not None and (mo.x_m != 0.0 or mo.y_m != 0.0 or mo.z_m != 0.0):
             return self._camera_model.pixel_to_angle_with_parallax(
-                pixel[0], pixel[1], depth_m, mo.x_m, mo.y_m, mo.z_m,
+                pixel[0],
+                pixel[1],
+                depth_m,
+                mo.x_m,
+                mo.y_m,
+                mo.z_m,
             )
         return self._camera_model.pixel_to_angle(*pixel)
 

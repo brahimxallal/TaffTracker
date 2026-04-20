@@ -30,7 +30,7 @@ class CameraModel:
         )
 
     @classmethod
-    def identity(cls, width: int, height: int) -> "CameraModel":
+    def identity(cls, width: int, height: int) -> CameraModel:
         camera_matrix = np.array(
             [[float(width), 0.0, width / 2.0], [0.0, float(height), height / 2.0], [0.0, 0.0, 1.0]],
             dtype=np.float32,
@@ -39,7 +39,7 @@ class CameraModel:
         return cls(CameraCalibration(camera_matrix, distortion, (width, height)))
 
     @classmethod
-    def from_fov(cls, hfov_degrees: float, width: int, height: int) -> "CameraModel":
+    def from_fov(cls, hfov_degrees: float, width: int, height: int) -> CameraModel:
         """Create camera model from horizontal field-of-view in degrees."""
         fx = (width / 2.0) / tan(radians(hfov_degrees / 2.0))
         fy = fx  # square pixels assumed
@@ -51,7 +51,7 @@ class CameraModel:
         return cls(CameraCalibration(camera_matrix, distortion, (width, height)))
 
     @classmethod
-    def load(cls, path: str | Path) -> "CameraModel":
+    def load(cls, path: str | Path) -> CameraModel:
         calibration_file = Path(path)
         if not calibration_file.exists():
             raise FileNotFoundError(f"Calibration file not found: {calibration_file}")

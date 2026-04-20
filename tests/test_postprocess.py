@@ -2,7 +2,11 @@ import numpy as np
 import pytest
 
 from src.config import PostprocessConfig
-from src.inference.postprocess import compute_stabilized_centroid, KeypointStabilizer, parse_yolo_output
+from src.inference.postprocess import (
+    KeypointStabilizer,
+    compute_stabilized_centroid,
+    parse_yolo_output,
+)
 from src.shared.pose_schema import get_pose_schema
 from src.shared.types import Detection
 
@@ -66,6 +70,7 @@ def test_stabilized_centroid_uses_official_dog_head_keypoints() -> None:
     raw[0, 0, 5] = 0.0
 
     keypoint_start = 6
+
     def set_kpt(index: int, x_value: float, y_value: float, visible: float = 1.0) -> None:
         offset = keypoint_start + (index * 3)
         raw[0, 0, offset : offset + 3] = np.array([x_value, y_value, visible])
@@ -92,7 +97,6 @@ def test_stabilized_centroid_uses_official_dog_head_keypoints() -> None:
     # Result should be biased toward head keypoints
     assert abs(centroid[0] - 51.1) < 2.0
     assert abs(centroid[1] - 59.7) < 2.0
-
 
 
 @pytest.mark.unit
@@ -159,7 +163,7 @@ def test_centroid_falls_back_to_bbox_when_no_keypoints() -> None:
     )
     cx, cy = compute_stabilized_centroid(detection, schema)
     assert abs(cx - 200.0) < 1e-3  # (100+300)/2
-    assert abs(cy - 230.0) < 5.0   # 200 + (400-200)*0.15 = 230
+    assert abs(cy - 230.0) < 5.0  # 200 + (400-200)*0.15 = 230
 
 
 @pytest.mark.unit
@@ -170,8 +174,8 @@ def test_centroid_nose_priority_boost() -> None:
     keypoints = np.zeros((17, 3), dtype=np.float32)
     # Head: nose(0), eyes(1,2), ears(3,4)
     keypoints[0] = [150.0, 100.0, 0.95]  # nose - high confidence
-    keypoints[1] = [140.0, 95.0, 0.9]    # left eye
-    keypoints[2] = [160.0, 95.0, 0.9]    # right eye
+    keypoints[1] = [140.0, 95.0, 0.9]  # left eye
+    keypoints[2] = [160.0, 95.0, 0.9]  # right eye
     keypoints[3] = [135.0, 100.0, 0.85]  # left ear
     keypoints[4] = [165.0, 100.0, 0.85]  # right ear
     detection = Detection(
@@ -198,8 +202,8 @@ def test_centroid_medium_quality_uses_lower_alpha() -> None:
     schema = get_pose_schema("human")
     # Only 2 head keypoints visible (below high_quality_min_keypoints threshold)
     keypoints = np.zeros((17, 3), dtype=np.float32)
-    keypoints[0] = [150.0, 100.0, 0.5]   # nose - moderate confidence
-    keypoints[1] = [145.0, 98.0, 0.5]    # left eye - moderate
+    keypoints[0] = [150.0, 100.0, 0.5]  # nose - moderate confidence
+    keypoints[1] = [145.0, 98.0, 0.5]  # left eye - moderate
     # Other keypoints invisible (conf=0)
     detection = Detection(
         bbox=np.array([100.0, 80.0, 200.0, 200.0]),
@@ -247,4 +251,4 @@ def test_centroid_all_keypoints_invisible_falls_back_to_bbox() -> None:
     )
     cx, cy = compute_stabilized_centroid(detection, schema)
     assert abs(cx - 200.0) < 1e-3  # bbox center x
-    assert abs(cy - 230.0) < 5.0   # 200 + (400-200)*0.15 = 230
+    assert abs(cy - 230.0) < 5.0  # 200 + (400-200)*0.15 = 230

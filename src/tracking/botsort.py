@@ -12,7 +12,7 @@ import cv2
 import numpy as np
 
 from src.shared.types import Detection, Track
-from src.tracking.bytetrack import ByteTracker, compute_iou_matrix, _scalar_iou
+from src.tracking.bytetrack import ByteTracker
 
 
 class BoTSORT(ByteTracker):
@@ -111,7 +111,10 @@ class BoTSORT(ByteTracker):
 
         # Feature extraction: reuse cached points when possible
         self._frames_since_feature_extract += 1
-        if self._prev_pts is None or self._frames_since_feature_extract >= self._cmc_feature_reuse_frames:
+        if (
+            self._prev_pts is None
+            or self._frames_since_feature_extract >= self._cmc_feature_reuse_frames
+        ):
             scale = self._cmc_downscale
             min_dist = self._cmc_min_distance * scale if scale < 1.0 else self._cmc_min_distance
             self._prev_pts = cv2.goodFeaturesToTrack(
@@ -170,9 +173,7 @@ class BoTSORT(ByteTracker):
 
 def _warp_bbox(bbox: np.ndarray, warp: np.ndarray) -> np.ndarray:
     """Warp an [x1,y1,x2,y2] bbox through a 2×3 affine transform."""
-    corners = np.array(
-        [[bbox[0], bbox[1]], [bbox[2], bbox[3]]], dtype=np.float64
-    )
+    corners = np.array([[bbox[0], bbox[1]], [bbox[2], bbox[3]]], dtype=np.float64)
     ones = np.ones((2, 1), dtype=np.float64)
     homog = np.hstack([corners, ones])  # (2, 3)
     warped = homog @ warp.T  # (2, 2)

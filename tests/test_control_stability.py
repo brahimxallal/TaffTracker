@@ -11,9 +11,8 @@ firmware adaptive EMA + camera-on-gimbal feedback, and verify:
 
 from __future__ import annotations
 
-import math
 import multiprocessing as mp
-from math import degrees, radians
+from math import radians
 
 import pytest
 
@@ -22,7 +21,6 @@ from src.output.process import OutputProcess
 from src.shared.protocol import decode_packet_v2
 from src.shared.ring_buffer import SharedRingBuffer
 from src.shared.types import TrackingMessage
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -71,7 +69,9 @@ def _make_controller(
         comm_config=CommConfig(),
         tracking_config=TrackingConfig(),
         gimbal_config=GimbalConfig(
-            kp=kp, kd=kd, deadband_deg=deadband_deg,
+            kp=kp,
+            kd=kd,
+            deadband_deg=deadband_deg,
             slew_limit_dps=slew_limit_dps,
             integral_decay_rate=integral_decay_rate,
             tilt_scale=1.0,
@@ -112,7 +112,8 @@ def _simulate_closed_loop(
         msg = _msg(
             servo_angles=(radians(camera_err_deg), radians(0.0)),
             servo_angular_velocity=(ang_vel_rad, 0.0),
-            timestamp_ns=ts, fps=60.0,
+            timestamp_ns=ts,
+            fps=60.0,
         )
         d = decode_packet_v2(proc._encode_packet(msg, frame))
         command_deg = d.pan / 100.0
@@ -144,9 +145,9 @@ def test_step_response_converges():
     try:
         positions = _simulate_closed_loop(proc, target_deg=15.0, n_frames=900)
         final_error = abs(15.0 - positions[-1])
-        assert final_error < 15.0 * 0.20, (
-            f"Failed to converge: final={positions[-1]:.2f}° error={final_error:.2f}°"
-        )
+        assert (
+            final_error < 15.0 * 0.20
+        ), f"Failed to converge: final={positions[-1]:.2f}° error={final_error:.2f}°"
     finally:
         layout.cleanup()
 
@@ -177,9 +178,7 @@ def test_step_response_overshoot_bounded():
         positions = _simulate_closed_loop(proc, target_deg=target, n_frames=600)
         max_pos = max(positions)
         overshoot_pct = max(0.0, (max_pos - target) / target * 100.0)
-        assert overshoot_pct < 5.0, (
-            f"Overshoot too high: {overshoot_pct:.1f}% (max={max_pos:.2f}°)"
-        )
+        assert overshoot_pct < 5.0, f"Overshoot too high: {overshoot_pct:.1f}% (max={max_pos:.2f}°)"
     finally:
         layout.cleanup()
 
@@ -205,9 +204,9 @@ def test_step_response_settling_time():
             if all(abs(target - p) < threshold for p in positions[i:]):
                 settled_frame = i
                 break
-        assert settled_frame is not None and settled_frame < 1200, (
-            f"Did not settle within 1200 frames (settled at frame {settled_frame})"
-        )
+        assert (
+            settled_frame is not None and settled_frame < 1200
+        ), f"Did not settle within 1200 frames (settled at frame {settled_frame})"
     finally:
         layout.cleanup()
 
@@ -243,7 +242,8 @@ def test_constant_velocity_tracking():
             msg = _msg(
                 servo_angles=(radians(camera_err_deg), radians(0.0)),
                 servo_angular_velocity=(ang_vel_rad, 0.0),
-                timestamp_ns=ts, fps=60.0,
+                timestamp_ns=ts,
+                fps=60.0,
             )
             d = decode_packet_v2(proc._encode_packet(msg, frame))
             cmd_buffer.append(d.pan / 100.0)
@@ -254,9 +254,7 @@ def test_constant_velocity_tracking():
         # After settling (frame 60+), steady-state error should be bounded
         ss_errors = errors[60:]
         avg_ss_error = sum(ss_errors) / len(ss_errors)
-        assert avg_ss_error < 15.0, (
-            f"Steady-state tracking error too large: {avg_ss_error:.2f}°"
-        )
+        assert avg_ss_error < 15.0, f"Steady-state tracking error too large: {avg_ss_error:.2f}°"
     finally:
         layout.cleanup()
 
@@ -272,7 +270,8 @@ def test_integral_decay_inside_deadband():
         # First: accumulate some integral with a large error
         msg1 = _msg(
             servo_angles=(radians(10.0), radians(0.0)),
-            timestamp_ns=_TS_BASE, fps=60.0,
+            timestamp_ns=_TS_BASE,
+            fps=60.0,
         )
         proc._encode_packet(msg1, 0)
         integral_after_drive = proc._pi_integral_pan
@@ -283,7 +282,8 @@ def test_integral_decay_inside_deadband():
             ts = _TS_BASE + (i + 1) * _TS_STEP
             msg = _msg(
                 servo_angles=(radians(0.5), radians(0.0)),
-                timestamp_ns=ts, fps=60.0,
+                timestamp_ns=ts,
+                fps=60.0,
             )
             proc._encode_packet(msg, i + 1)
 
@@ -305,15 +305,18 @@ def test_large_step_does_not_oscillate():
     proc, layout = _make_controller(kp=4.0, kd=0.7)
     try:
         positions = _simulate_closed_loop(
-            proc, target_deg=50.0, n_frames=600, fw_alpha=0.50,
+            proc,
+            target_deg=50.0,
+            n_frames=600,
+            fw_alpha=0.50,
         )
         # Verify system is approaching target (not diverging)
         error_start = abs(50.0 - positions[60])  # error after initial transient
         error_mid = abs(50.0 - positions[300])
         error_end = abs(50.0 - positions[-1])
-        assert error_end < error_start, (
-            f"System diverging: error_start={error_start:.2f}° error_end={error_end:.2f}°"
-        )
+        assert (
+            error_end < error_start
+        ), f"System diverging: error_start={error_start:.2f}° error_end={error_end:.2f}°"
         assert error_end < error_mid or error_mid < error_start * 0.8, (
             f"System not converging: error_start={error_start:.2f}° "
             f"error_mid={error_mid:.2f}° error_end={error_end:.2f}°"

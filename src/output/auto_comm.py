@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 import logging
 import time
+from collections.abc import Callable
 from typing import Literal, Protocol
 
 from src.config import CommConfig
 from src.output.serial_comm import SerialComm
 from src.output.udp_comm import UDPComm
-
 
 LOGGER = logging.getLogger("auto_comm")
 
@@ -122,7 +121,9 @@ class AutoCommTransport:
             "active_channel": self._active_channel,
             "packets_sent": self._packets_sent,
             "packets_failed": self._packets_failed,
-            "sender": self._active_sender.health_check() if self._active_sender is not None else None,
+            "sender": (
+                self._active_sender.health_check() if self._active_sender is not None else None
+            ),
         }
 
     def close(self) -> None:

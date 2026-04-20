@@ -80,6 +80,7 @@ def test_lower_mincutoff_reduces_jitter() -> None:
     dt = 1 / 60.0
     # Random jitter around 100 (not perfectly alternating)
     import random
+
     rng = random.Random(42)
     rng_vals = [100 + rng.uniform(-5, 5) for _ in range(200)]
 

@@ -91,7 +91,7 @@ def draw_overlay(
         sm.clear()
 
     # Secondary target markers
-    for cx_f, cy_f, tid, score in message.other_targets:
+    for cx_f, cy_f, _tid, _score in message.other_targets:
         _draw_secondary_marker(frame, int(cx_f), int(cy_f))
 
     # Target priority panel (top-right) — shows all tracked targets
@@ -139,8 +139,26 @@ def _draw_fps_bar(canvas: np.ndarray, msg: TrackingMessage) -> None:
     gap = 16
     fps_color = _GREEN if msg.fps > 45 else _YELLOW
     cv2.putText(canvas, f"FPS {msg.fps:.0f}", (x, y), font, scale, fps_color, thick, cv2.LINE_AA)
-    cv2.putText(canvas, f"INF {msg.inference_ms:.1f}ms", (x, y + gap), font, scale, _WHITE, thick, cv2.LINE_AA)
-    cv2.putText(canvas, f"TRK {msg.tracking_ms:.1f}ms", (x, y + gap * 2), font, scale, _WHITE, thick, cv2.LINE_AA)
+    cv2.putText(
+        canvas,
+        f"INF {msg.inference_ms:.1f}ms",
+        (x, y + gap),
+        font,
+        scale,
+        _WHITE,
+        thick,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        canvas,
+        f"TRK {msg.tracking_ms:.1f}ms",
+        (x, y + gap * 2),
+        font,
+        scale,
+        _WHITE,
+        thick,
+        cv2.LINE_AA,
+    )
 
 
 def _draw_mode_indicator(canvas: np.ndarray, manual_mode: bool, laser_enabled: bool) -> None:
@@ -181,7 +199,9 @@ def _draw_target_panel(canvas: np.ndarray, msg: TrackingMessage) -> None:
     ph = len(entries) * line_h + 8
     px = w - pw - 8
     py = 8
-    sub = canvas[py:py + ph, px:px + pw]
+    sub = canvas[py : py + ph, px : px + pw]
     cv2.addWeighted(sub, 0.4, sub, 0, 0, sub)
     for i, (text, color) in enumerate(entries):
-        cv2.putText(canvas, text, (px + 4, py + 12 + i * line_h), font, scale, color, thick, cv2.LINE_AA)
+        cv2.putText(
+            canvas, text, (px + 4, py + 12 + i * line_h), font, scale, color, thick, cv2.LINE_AA
+        )

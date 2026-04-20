@@ -1,17 +1,15 @@
 from __future__ import annotations
 
 import ctypes
-from dataclasses import dataclass
 import json
+import logging
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-import logging
-
-from cuda.bindings import runtime as cudart
 import numpy as np
 import tensorrt as trt
-
+from cuda.bindings import runtime as cudart
 
 LOGGER = logging.getLogger("trt_engine")
 

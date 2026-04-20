@@ -11,8 +11,12 @@ from src.config import CameraConfig, CommConfig, GimbalConfig, RuntimeFlags, Tra
 from src.output.auto_comm import AutoCommTransport
 from src.output.process import OutputProcess, _get_transport_status
 from src.output.serial_comm import SerialComm
-from src.output.udp_comm import UDPComm
-from src.shared.protocol import FLAG_FAST_MOTION, FLAG_LASER_ON, FLAG_TARGET_ACQUIRED, decode_packet_v2
+from src.shared.protocol import (
+    FLAG_FAST_MOTION,
+    FLAG_LASER_ON,
+    FLAG_TARGET_ACQUIRED,
+    decode_packet_v2,
+)
 from src.shared.ring_buffer import SharedRingBuffer
 from src.shared.types import TrackingMessage
 
@@ -150,7 +154,10 @@ def test_encode_packet_converts_angles_to_centidegrees() -> None:
         comm_config=CommConfig(channel="serial", serial_port="COM3"),
         tracking_config=TrackingConfig(hold_time_s=0.5),
         gimbal_config=GimbalConfig(
-            kp=60.0, kd=0.0, deadband_deg=0.0, slew_limit_dps=1e6,
+            kp=60.0,
+            kd=0.0,
+            deadband_deg=0.0,
+            slew_limit_dps=1e6,
             tilt_scale=1.0,
         ),
     )
@@ -182,7 +189,7 @@ def test_encode_packet_clamps_confidence() -> None:
 @pytest.mark.unit
 def test_encode_packet_encodes_velocity() -> None:
     proc = _make_proc()
-    pan_vel_rad = 0.15   # rad/s
+    pan_vel_rad = 0.15  # rad/s
     tilt_vel_rad = -0.25
     msg = _make_message(
         filtered_angles=(0.0, 0.0),
@@ -214,9 +221,7 @@ def test_center_message_clears_velocity() -> None:
 # --- Sign inversion tests ---
 
 
-def _make_proc_with_gimbal(
-    invert_pan: bool = False, invert_tilt: bool = False
-) -> OutputProcess:
+def _make_proc_with_gimbal(invert_pan: bool = False, invert_tilt: bool = False) -> OutputProcess:
     return OutputProcess(
         layout=None,  # type: ignore[arg-type]
         write_index=None,  # type: ignore[arg-type]
@@ -230,7 +235,9 @@ def _make_proc_with_gimbal(
         gimbal_config=GimbalConfig(
             invert_pan=invert_pan,
             invert_tilt=invert_tilt,
-            kp=1.0, ki=0.0, kd=0.0,
+            kp=1.0,
+            ki=0.0,
+            kd=0.0,
         ),
     )
 
@@ -634,7 +641,9 @@ def test_create_sender_returns_none_on_failure(monkeypatch) -> None:
 @pytest.mark.unit
 def test_create_sender_auto_returns_auto_transport(monkeypatch) -> None:
     proc = _make_full_proc(
-        comm_config=CommConfig(channel="auto", serial_port="COM99", udp_host="1.2.3.4", udp_port=9999)
+        comm_config=CommConfig(
+            channel="auto", serial_port="COM99", udp_host="1.2.3.4", udp_port=9999
+        )
     )
     sentinel = MagicMock(spec=AutoCommTransport)
     monkeypatch.setattr("src.output.process.AutoCommTransport", lambda config: sentinel)
@@ -647,7 +656,9 @@ def test_create_sender_auto_returns_auto_transport(monkeypatch) -> None:
 @pytest.mark.unit
 def test_create_sender_auto_returns_none_when_transport_init_fails(monkeypatch) -> None:
     proc = _make_full_proc(
-        comm_config=CommConfig(channel="auto", serial_port="COM99", udp_host="1.2.3.4", udp_port=9999)
+        comm_config=CommConfig(
+            channel="auto", serial_port="COM99", udp_host="1.2.3.4", udp_port=9999
+        )
     )
     monkeypatch.setattr(
         "src.output.process.AutoCommTransport",

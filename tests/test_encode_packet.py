@@ -8,10 +8,10 @@ import pytest
 from src.config import CameraConfig, CommConfig, GimbalConfig, TrackingConfig
 from src.output.process import OutputProcess
 from src.shared.protocol import (
+    FLAG_HIGH_CONFIDENCE,
     FLAG_LASER_ON,
     FLAG_RELAY_ON,
     FLAG_TARGET_ACQUIRED,
-    FLAG_HIGH_CONFIDENCE,
     HEADER_V2,
     PACKET_V2_SIZE,
     decode_packet_v2,
@@ -161,8 +161,8 @@ def test_invert_pan():
 def test_no_offset_fields_on_gimbal_config():
     """GimbalConfig no longer has offset fields; firmware owns offsets."""
     gc = GimbalConfig()
-    assert not hasattr(gc, 'pan_offset_deg')
-    assert not hasattr(gc, 'tilt_offset_deg')
+    assert not hasattr(gc, "pan_offset_deg")
+    assert not hasattr(gc, "tilt_offset_deg")
 
 
 # ── Pan/tilt clamped to limits ───────────────────────────────────
@@ -195,7 +195,7 @@ def test_clamped_to_limits():
     msg = _msg(servo_angles=(1.0, -1.0))  # ~57.3°
     for i in range(5):
         decoded = decode_packet_v2(proc._encode_packet(msg, i))
-    assert decoded.pan == 1000   # 10° × 100
+    assert decoded.pan == 1000  # 10° × 100
     assert decoded.tilt == -1000  # -10° × 100
     layout.cleanup()
 
@@ -348,7 +348,7 @@ def test_velocity_encoding(output_process: OutputProcess) -> None:
 # ── Camera-on-gimbal PI controller ───────────────────────────────
 
 _TS_BASE = 1_000_000_000  # 1 second in ns
-_TS_STEP = 18_181_818     # ~55 fps in ns
+_TS_STEP = 18_181_818  # ~55 fps in ns
 
 
 def _make_gimbal_proc(**kwargs):
@@ -359,10 +359,15 @@ def _make_gimbal_proc(**kwargs):
     """
     layout, write_index = SharedRingBuffer.create((480, 640, 3), num_slots=2)
     defaults = dict(
-        invert_pan=False, invert_tilt=False,
-        pan_limit_deg=90.0, tilt_limit_deg=90.0,
-        kp=4.0, kd=0.0, deadband_deg=0.0,
-        integral_decay_rate=0.0, slew_limit_dps=1000.0,
+        invert_pan=False,
+        invert_tilt=False,
+        pan_limit_deg=90.0,
+        tilt_limit_deg=90.0,
+        kp=4.0,
+        kd=0.0,
+        deadband_deg=0.0,
+        integral_decay_rate=0.0,
+        slew_limit_dps=1000.0,
         tilt_scale=1.0,
     )
     defaults.update(kwargs)
@@ -389,7 +394,8 @@ def test_pi_first_frame_uses_kp_plus_ki():
         err_deg = 10.0
         msg = _msg(
             servo_angles=(math.radians(err_deg), math.radians(0.0)),
-            timestamp_ns=_TS_BASE, fps=55.0,
+            timestamp_ns=_TS_BASE,
+            fps=55.0,
         )
         d = decode_packet_v2(proc._encode_packet(msg, 0))
         dt = 1.0 / 55.0
@@ -407,13 +413,15 @@ def test_pi_integral_accumulates_over_frames():
         err_deg = 5.0
         msg1 = _msg(
             servo_angles=(math.radians(err_deg), math.radians(0.0)),
-            timestamp_ns=_TS_BASE, fps=55.0,
+            timestamp_ns=_TS_BASE,
+            fps=55.0,
         )
         proc._encode_packet(msg1, 0)
 
         msg2 = _msg(
             servo_angles=(math.radians(err_deg), math.radians(0.0)),
-            timestamp_ns=_TS_BASE + _TS_STEP, fps=55.0,
+            timestamp_ns=_TS_BASE + _TS_STEP,
+            fps=55.0,
         )
         d2 = decode_packet_v2(proc._encode_packet(msg2, 1))
         dt = _TS_STEP / 1e9
@@ -431,14 +439,16 @@ def test_pi_zero_error_holds_integral():
     try:
         msg1 = _msg(
             servo_angles=(math.radians(10.0), math.radians(0.0)),
-            timestamp_ns=_TS_BASE, fps=55.0,
+            timestamp_ns=_TS_BASE,
+            fps=55.0,
         )
         proc._encode_packet(msg1, 0)
         integral_now = proc._pi_integral_pan
 
         msg2 = _msg(
             servo_angles=(math.radians(0.0), math.radians(0.0)),
-            timestamp_ns=_TS_BASE + _TS_STEP, fps=55.0,
+            timestamp_ns=_TS_BASE + _TS_STEP,
+            fps=55.0,
         )
         d2 = decode_packet_v2(proc._encode_packet(msg2, 1))
         # Zero error → rate=0 → integral unchanged (no decay since rate=0)
@@ -454,14 +464,18 @@ def test_pi_resets_on_center():
     try:
         msg1 = _msg(
             servo_angles=(math.radians(10.0), math.radians(5.0)),
-            timestamp_ns=_TS_BASE, fps=55.0,
+            timestamp_ns=_TS_BASE,
+            fps=55.0,
         )
         proc._encode_packet(msg1, 0)
 
         msg_center = _msg(
-            target_acquired=False, state_source="center",
-            servo_angles=(0.0, 0.0), confidence=0.0,
-            timestamp_ns=_TS_BASE + _TS_STEP, fps=55.0,
+            target_acquired=False,
+            state_source="center",
+            servo_angles=(0.0, 0.0),
+            confidence=0.0,
+            timestamp_ns=_TS_BASE + _TS_STEP,
+            fps=55.0,
         )
         d = decode_packet_v2(proc._encode_packet(msg_center, 1))
         assert d.pan == 0
@@ -469,7 +483,8 @@ def test_pi_resets_on_center():
 
         msg3 = _msg(
             servo_angles=(math.radians(5.0), math.radians(0.0)),
-            timestamp_ns=_TS_BASE + 2 * _TS_STEP, fps=55.0,
+            timestamp_ns=_TS_BASE + 2 * _TS_STEP,
+            fps=55.0,
         )
         d3 = decode_packet_v2(proc._encode_packet(msg3, 2))
         assert d3.pan < 400
@@ -484,16 +499,19 @@ def test_pi_holds_integral_during_prediction():
     try:
         msg1 = _msg(
             servo_angles=(math.radians(8.0), math.radians(0.0)),
-            timestamp_ns=_TS_BASE, fps=55.0,
+            timestamp_ns=_TS_BASE,
+            fps=55.0,
         )
         proc._encode_packet(msg1, 0)
         integral_held = proc._pi_integral_pan
 
         msg_pred = _msg(
-            target_acquired=False, state_source="prediction",
+            target_acquired=False,
+            state_source="prediction",
             servo_angles=(math.radians(2.0), math.radians(0.0)),
             confidence=0.0,
-            timestamp_ns=_TS_BASE + _TS_STEP, fps=55.0,
+            timestamp_ns=_TS_BASE + _TS_STEP,
+            fps=55.0,
         )
         d = decode_packet_v2(proc._encode_packet(msg_pred, 1))
         # Prediction: holds integral, doesn't accumulate further
@@ -502,7 +520,8 @@ def test_pi_holds_integral_during_prediction():
         # After re-acquisition, integral resumes from held value
         msg3 = _msg(
             servo_angles=(math.radians(1.0), math.radians(0.0)),
-            timestamp_ns=_TS_BASE + 2 * _TS_STEP, fps=55.0,
+            timestamp_ns=_TS_BASE + 2 * _TS_STEP,
+            fps=55.0,
         )
         d3 = decode_packet_v2(proc._encode_packet(msg3, 2))
         dt = _TS_STEP / 1e9
@@ -516,13 +535,17 @@ def test_pi_holds_integral_during_prediction():
 def test_pi_antiwindup_clamps_integral():
     """Accumulated command is clamped to pan/tilt limits (anti-windup)."""
     proc, layout = _make_gimbal_proc(
-        pan_limit_deg=15.0, tilt_limit_deg=15.0,
-        kp=100000.0, kd=0.0, slew_limit_dps=1e6,
+        pan_limit_deg=15.0,
+        tilt_limit_deg=15.0,
+        kp=100000.0,
+        kd=0.0,
+        slew_limit_dps=1e6,
     )
     try:
         msg = _msg(
             servo_angles=(math.radians(20.0), math.radians(-20.0)),
-            timestamp_ns=_TS_BASE, fps=55.0,
+            timestamp_ns=_TS_BASE,
+            fps=55.0,
         )
         d = decode_packet_v2(proc._encode_packet(msg, 0))
         assert d.pan == 1500
@@ -538,7 +561,8 @@ def test_pi_with_inversion():
     try:
         msg = _msg(
             servo_angles=(math.radians(5.0), math.radians(3.0)),
-            timestamp_ns=_TS_BASE, fps=55.0,
+            timestamp_ns=_TS_BASE,
+            fps=55.0,
         )
         d = decode_packet_v2(proc._encode_packet(msg, 0))
         assert d.pan < 0
@@ -565,7 +589,8 @@ def test_pi_convergence_simulation():
             camera_err_deg = target_world_deg - servo_pos_deg
             msg = _msg(
                 servo_angles=(math.radians(camera_err_deg), math.radians(0.0)),
-                timestamp_ns=ts, fps=55.0,
+                timestamp_ns=ts,
+                fps=55.0,
             )
             d = decode_packet_v2(proc._encode_packet(msg, frame))
             command_deg = d.pan / 100.0
@@ -587,7 +612,9 @@ def test_pi_integral_survives_track_change():
     try:
         msg1 = _msg(
             servo_angles=(math.radians(10.0), math.radians(5.0)),
-            timestamp_ns=_TS_BASE, fps=55.0, track_id=1,
+            timestamp_ns=_TS_BASE,
+            fps=55.0,
+            track_id=1,
         )
         proc._encode_packet(msg1, 0)
         integral_before = proc._pi_integral_pan
@@ -596,7 +623,9 @@ def test_pi_integral_survives_track_change():
         # Track changes to 5 — integral should NOT reset
         msg2 = _msg(
             servo_angles=(math.radians(3.0), math.radians(1.0)),
-            timestamp_ns=_TS_BASE + _TS_STEP, fps=55.0, track_id=5,
+            timestamp_ns=_TS_BASE + _TS_STEP,
+            fps=55.0,
+            track_id=5,
         )
         proc._encode_packet(msg2, 1)
         # Integral grew (added kp*3*dt), not reset

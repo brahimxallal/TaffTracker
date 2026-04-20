@@ -17,7 +17,9 @@ def _make_frame(h: int = 64, w: int = 64, seed: int = 0) -> np.ndarray:
 @pytest.mark.unit
 def test_botsort_preserves_track_id_like_bytetrack() -> None:
     """BoTSORT should behave identically to ByteTracker for basic matching."""
-    tracker = BoTSORT(track_thresh=0.5, match_thresh=0.3, max_lost=3, birth_min_hits=1, cmc_enabled=False)
+    tracker = BoTSORT(
+        track_thresh=0.5, match_thresh=0.3, max_lost=3, birth_min_hits=1, cmc_enabled=False
+    )
     frame_one = [Detection(bbox=np.array([0, 0, 10, 10]), score=0.9)]
     frame_two = [Detection(bbox=np.array([1, 0, 11, 10]), score=0.88)]
 
@@ -32,7 +34,9 @@ def test_botsort_preserves_track_id_like_bytetrack() -> None:
 @pytest.mark.unit
 def test_botsort_cmc_warps_tracks_with_frame() -> None:
     """When CMC is enabled and a frame is passed, tracks should be warped before matching."""
-    tracker = BoTSORT(track_thresh=0.5, match_thresh=0.3, max_lost=3, birth_min_hits=1, cmc_enabled=True)
+    tracker = BoTSORT(
+        track_thresh=0.5, match_thresh=0.3, max_lost=3, birth_min_hits=1, cmc_enabled=True
+    )
     frame1 = _make_frame(64, 64, seed=42)
     frame2 = _make_frame(64, 64, seed=42)  # same frame = identity warp
 
@@ -47,7 +51,9 @@ def test_botsort_cmc_warps_tracks_with_frame() -> None:
 @pytest.mark.unit
 def test_botsort_cmc_disabled_works_like_bytetrack() -> None:
     """With cmc_enabled=False, BoTSORT is identical to ByteTracker."""
-    tracker = BoTSORT(track_thresh=0.5, match_thresh=0.3, max_lost=2, birth_min_hits=1, cmc_enabled=False)
+    tracker = BoTSORT(
+        track_thresh=0.5, match_thresh=0.3, max_lost=2, birth_min_hits=1, cmc_enabled=False
+    )
     tracker.update([Detection(bbox=np.array([0, 0, 10, 10]), score=0.9)], timestamp_ns=1)
     tracker.update([], timestamp_ns=2)
     tracker.update([], timestamp_ns=3)
@@ -59,7 +65,9 @@ def test_botsort_cmc_disabled_works_like_bytetrack() -> None:
 def test_botsort_reset_clears_cmc_state() -> None:
     tracker = BoTSORT(track_thresh=0.5, match_thresh=0.3, max_lost=10, birth_min_hits=1)
     frame = _make_frame(64, 64, seed=1)
-    tracker.update([Detection(bbox=np.array([0, 0, 10, 10]), score=0.9)], timestamp_ns=1, frame=frame)
+    tracker.update(
+        [Detection(bbox=np.array([0, 0, 10, 10]), score=0.9)], timestamp_ns=1, frame=frame
+    )
 
     tracker.reset()
     assert tracker._prev_gray is None
@@ -70,7 +78,9 @@ def test_botsort_reset_clears_cmc_state() -> None:
 @pytest.mark.unit
 def test_botsort_update_without_frame_still_works() -> None:
     """Calling update without a frame should work (no CMC applied)."""
-    tracker = BoTSORT(track_thresh=0.5, match_thresh=0.3, max_lost=3, birth_min_hits=1, cmc_enabled=True)
+    tracker = BoTSORT(
+        track_thresh=0.5, match_thresh=0.3, max_lost=3, birth_min_hits=1, cmc_enabled=True
+    )
     det = [Detection(bbox=np.array([10, 10, 30, 30]), score=0.9)]
     tracks = tracker.update(det, timestamp_ns=1)
     assert len(tracks) == 1
@@ -99,7 +109,14 @@ def test_warp_bbox_translation() -> None:
 @pytest.mark.unit
 def test_botsort_low_conf_matching_works() -> None:
     """Low-confidence detections should still match existing tracks."""
-    tracker = BoTSORT(track_thresh=0.5, low_thresh=0.2, match_thresh=0.3, max_lost=2, birth_min_hits=1, cmc_enabled=False)
+    tracker = BoTSORT(
+        track_thresh=0.5,
+        low_thresh=0.2,
+        match_thresh=0.3,
+        max_lost=2,
+        birth_min_hits=1,
+        cmc_enabled=False,
+    )
     tracker.update([Detection(bbox=np.array([0, 0, 10, 10]), score=0.9)], timestamp_ns=1)
     tracks = tracker.update([Detection(bbox=np.array([1, 0, 11, 10]), score=0.3)], timestamp_ns=2)
     assert len(tracks) == 1

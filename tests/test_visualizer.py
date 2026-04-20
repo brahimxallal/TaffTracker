@@ -3,7 +3,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from src.output.visualizer import draw_overlay, FrameSmoother
+from src.output.visualizer import FrameSmoother, draw_overlay
 from src.shared.types import TrackingMessage
 
 

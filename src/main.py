@@ -19,7 +19,6 @@ from src.shared.pose_schema import get_pose_schema
 from src.shared.ring_buffer import SharedRingBuffer
 from src.shared.types import ProcessErrorReport
 
-
 LOGGER = logging.getLogger("main")
 
 MANUAL_FINE_SPEED_DPS = 120.0
@@ -43,6 +42,7 @@ def _log_system_info() -> None:
     """Log system information for debugging and monitoring."""
     try:
         import platform
+
         import torch
 
         LOGGER.info("System: %s %s (%s)", platform.system(), platform.release(), platform.machine())
@@ -141,7 +141,11 @@ def _log_error_reports(reports: list[ProcessErrorReport]) -> None:
 
 
 def _find_unexpected_dead_processes(processes: list[mp.Process]) -> list[mp.Process]:
-    return [process for process in processes if not process.is_alive() and process.exitcode not in (None, 0)]
+    return [
+        process
+        for process in processes
+        if not process.is_alive() and process.exitcode not in (None, 0)
+    ]
 
 
 def _all_processes_stopped(processes: list[mp.Process]) -> bool:
@@ -160,7 +164,9 @@ def _check_runtime_failures(
 
 
 def _process_was_started(process: mp.Process) -> bool:
-    return getattr(process, "pid", None) is not None or getattr(process, "exitcode", None) is not None
+    return (
+        getattr(process, "pid", None) is not None or getattr(process, "exitcode", None) is not None
+    )
 
 
 def _stop_processes(
@@ -376,8 +382,8 @@ def main() -> None:
     cycle_target_event = mp.Event()
 
     # Manual gimbal control shared state
-    manual_mode = mp.Value("b", 0)   # 0=auto, 1=manual
-    manual_pan = mp.Value("d", 0.0)   # absolute pan angle (degrees)
+    manual_mode = mp.Value("b", 0)  # 0=auto, 1=manual
+    manual_pan = mp.Value("d", 0.0)  # absolute pan angle (degrees)
     manual_tilt = mp.Value("d", 0.0)  # absolute tilt angle (degrees)
     manual_last_time: float = time.perf_counter()
     _manual_vel_pan: float = 0.0
@@ -390,7 +396,9 @@ def main() -> None:
     from src.calibration.laser_boresight import LaserBoresight
     from src.calibration.laser_calibrator import LaserCalibrator
 
-    laser_cal_save_path = config.paths.resolve_path(config.paths.calibration_dir) / "servo_limits.json"
+    laser_cal_save_path = (
+        config.paths.resolve_path(config.paths.calibration_dir) / "servo_limits.json"
+    )
     laser_calibrator = LaserCalibrator(
         save_path=laser_cal_save_path,
         initial=LaserBoresight(
@@ -481,15 +489,15 @@ def main() -> None:
                 restarted_any = False
                 for dead in dead_processes:
                     name = dead.name
-                    LOGGER.error(
-                        "%s exited unexpectedly with code %s", name, dead.exitcode
-                    )
+                    LOGGER.error("%s exited unexpectedly with code %s", name, dead.exitcode)
                     factory = _process_factories.get(name)
                     if factory and _restart_counts[name] < _MAX_PROCESS_RESTARTS:
                         _restart_counts[name] += 1
                         LOGGER.warning(
                             "Restarting %s (attempt %d/%d)",
-                            name, _restart_counts[name], _MAX_PROCESS_RESTARTS,
+                            name,
+                            _restart_counts[name],
+                            _MAX_PROCESS_RESTARTS,
                         )
                         new_proc = factory()
                         idx = processes.index(dead)
@@ -499,7 +507,8 @@ def main() -> None:
                     else:
                         LOGGER.error(
                             "%s exhausted restart attempts (%d) — shutting down",
-                            name, _MAX_PROCESS_RESTARTS,
+                            name,
+                            _MAX_PROCESS_RESTARTS,
                         )
                         _log_error_reports(reports)
                         shutdown_event.set()
@@ -582,7 +591,8 @@ def main() -> None:
                         manual_mode.value = 1
                         LOGGER.info(
                             "Switched to MANUAL (pan=%.1f tilt=%.1f)",
-                            manual_pan.value, manual_tilt.value,
+                            manual_pan.value,
+                            manual_tilt.value,
                         )
                     manual_last_time = time.perf_counter()
 
@@ -630,8 +640,12 @@ def main() -> None:
 
                     moved = abs(_manual_vel_pan) > 0.05 or abs(_manual_vel_tilt) > 0.05
                     if moved:
-                        manual_pan.value = max(-pan_lim, min(pan_lim, manual_pan.value + _manual_vel_pan * dt))
-                        manual_tilt.value = max(-tilt_lim, min(tilt_lim, manual_tilt.value + _manual_vel_tilt * dt))
+                        manual_pan.value = max(
+                            -pan_lim, min(pan_lim, manual_pan.value + _manual_vel_pan * dt)
+                        )
+                        manual_tilt.value = max(
+                            -tilt_lim, min(tilt_lim, manual_tilt.value + _manual_vel_tilt * dt)
+                        )
                     else:
                         _manual_vel_pan = 0.0
                         _manual_vel_tilt = 0.0

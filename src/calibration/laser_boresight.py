@@ -33,7 +33,7 @@ class LaserBoresight:
     tilt_offset_deg: float = 0.0
 
     @classmethod
-    def zero(cls) -> "LaserBoresight":
+    def zero(cls) -> LaserBoresight:
         return cls()
 
 

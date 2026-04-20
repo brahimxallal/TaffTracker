@@ -1,4 +1,5 @@
 """Tests for InferenceProcess helper methods that don't require TensorRT."""
+
 from __future__ import annotations
 
 import multiprocessing as mp

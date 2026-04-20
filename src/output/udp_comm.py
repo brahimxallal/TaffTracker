@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 import logging
 import os
 import socket
 import subprocess
 import threading
+from collections.abc import Callable
 
 LOGGER = logging.getLogger("udp_comm")
 

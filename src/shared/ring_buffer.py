@@ -1,14 +1,13 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
-from multiprocessing.shared_memory import SharedMemory
 import ctypes
 import multiprocessing as mp
+from dataclasses import dataclass
+from multiprocessing.shared_memory import SharedMemory
 from multiprocessing.sharedctypes import Synchronized
 from typing import Self
 
 import numpy as np
-
 
 _META_DTYPE = np.dtype(
     [("timestamp_ns", np.int64), ("frame_id", np.int64), ("generation", np.uint64)]

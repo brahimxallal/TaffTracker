@@ -1,4 +1,5 @@
 """FPS-adaptive parameters and unified adaptive mode."""
+
 from __future__ import annotations
 
 import pytest
@@ -8,7 +9,6 @@ from src.config import (
     adapt_tracking_for_fps,
 )
 from src.tracking.adaptive import AdaptiveController
-
 
 # --- FPS adaptation ---
 

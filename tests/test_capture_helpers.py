@@ -5,8 +5,8 @@ import multiprocessing as mp
 import cv2
 import pytest
 
-from src.config import CameraConfig
 from src.capture.process import CaptureProcess
+from src.config import CameraConfig
 
 
 def _make_capture_process(**cam_overrides) -> CaptureProcess:
@@ -124,6 +124,7 @@ def test_resolve_playback_interval_non_file():
 @pytest.mark.unit
 def test_resolve_playback_interval_positive_fps():
     from unittest.mock import MagicMock
+
     proc = _make_capture_process()
     cap = MagicMock()
     cap.get.side_effect = lambda prop: 30.0 if prop == cv2.CAP_PROP_FPS else 0.0
@@ -135,6 +136,7 @@ def test_resolve_playback_interval_positive_fps():
 @pytest.mark.unit
 def test_resolve_playback_interval_zero_fps_uses_config():
     from unittest.mock import MagicMock
+
     proc = _make_capture_process(fps=60)
     cap = MagicMock()
     cap.get.return_value = 0.0
@@ -180,7 +182,7 @@ def test_letterbox_math_taller_frame():
     assert scale == 1.0
     assert new_w == 480
     assert new_h == 640
-    assert pad_left == 80   # (640-480)/2
+    assert pad_left == 80  # (640-480)/2
     assert pad_top == 0
 
 

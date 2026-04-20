@@ -5,7 +5,6 @@ from enum import Enum
 from pathlib import Path
 from typing import Literal
 
-
 Mode = Literal["camera", "video"]
 TargetKind = Literal["human", "dog"]
 CommChannel = Literal["serial", "udp", "auto"]
@@ -15,8 +14,10 @@ LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
 
 
 class Orientation(str, Enum):
-    PORTRAIT = "portrait"                # Portrait stream letterboxed in landscape feed (old DroidCam portrait)
-    LANDSCAPE_NATIVE = "landscape_native"  # Phone physically horizontal, USB right; full-frame landscape feed
+    PORTRAIT = "portrait"  # Portrait stream letterboxed in landscape feed (old DroidCam portrait)
+    LANDSCAPE_NATIVE = (
+        "landscape_native"  # Phone physically horizontal, USB right; full-frame landscape feed
+    )
 
 
 @dataclass(frozen=True)
@@ -28,7 +29,7 @@ class CameraConfig:
     buffer_size: int = 1
     orientation: Orientation = Orientation.LANDSCAPE_NATIVE
     fov: float | None = None
-    capture_width: int = 1920   # Native camera resolution to request
+    capture_width: int = 1920  # Native camera resolution to request
     capture_height: int = 1080  # (letterbox rescales to width x height)
 
     @property
@@ -233,7 +234,9 @@ class GimbalConfig:
     deadband_deg: float = 1.2  # Suppress corrections below this error (degrees)
     integral_decay_rate: float = 1.0  # Decay rate (/s) for accumulated command inside deadband
     slew_limit_dps: float = 25.0  # Max command change rate (°/s)
-    tilt_scale: float = 0.45  # Tilt gain multiplier (camera-on-gimbal tilt has stronger ego-motion feedback)
+    tilt_scale: float = (
+        0.45  # Tilt gain multiplier (camera-on-gimbal tilt has stronger ego-motion feedback)
+    )
     velocity_feedforward_gain: float = 0.0  # FF gain on Kalman target velocity (0 = disabled)
     kp_far: float | None = None  # kp when error > gain_schedule_threshold_deg (None → kp)
     kp_near: float | None = None  # kp when error <= gain_schedule_threshold_deg (None → kp)

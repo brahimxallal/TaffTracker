@@ -17,7 +17,8 @@ def engine_dir(tmp_path: Path) -> Path:
 
 @pytest.mark.unit
 def test_validate_environment_rejects_missing_fov_in_camera_mode(
-    engine_dir: Path, tmp_path: Path,
+    engine_dir: Path,
+    tmp_path: Path,
 ) -> None:
     config = PipelineConfig(
         mode="camera",
@@ -32,7 +33,9 @@ def test_validate_environment_rejects_missing_fov_in_camera_mode(
 
 
 @pytest.mark.unit
-def test_validate_environment_allows_video_mode_without_calibration(engine_dir: Path, tmp_path: Path) -> None:
+def test_validate_environment_allows_video_mode_without_calibration(
+    engine_dir: Path, tmp_path: Path
+) -> None:
     video_path = tmp_path / "video.mp4"
     video_path.write_bytes(b"video")
 

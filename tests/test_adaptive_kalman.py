@@ -1,4 +1,5 @@
 """Phase 5: Adaptive Kalman L2 tests — adaptive R/Q, innovation gate, ORU, prediction cap."""
+
 from __future__ import annotations
 
 import pytest
@@ -7,7 +8,6 @@ from src.tracking.kalman import (
     MAX_CONSECUTIVE_PREDICTIONS,
     KalmanFilter,
 )
-
 
 # --- Adaptive R/Q tests ---
 
@@ -95,7 +95,7 @@ def test_prediction_cap_resets_after_max() -> None:
     kalman.update((50.0, 50.0), dt=0.1)
 
     # Predict up to max
-    for i in range(MAX_CONSECUTIVE_PREDICTIONS):
+    for _i in range(MAX_CONSECUTIVE_PREDICTIONS):
         result = kalman.predict(0.1)
         assert result is not None
 
@@ -110,7 +110,7 @@ def test_prediction_counter_increments() -> None:
     kalman = KalmanFilter()
     kalman.update((0.0, 0.0), dt=0.1)
 
-    for i in range(5):
+    for _i in range(5):
         kalman.predict(0.1)
     assert kalman.consecutive_predictions == 5
 
@@ -350,7 +350,7 @@ def test_prediction_decay_disabled_when_start_exceeds_max() -> None:
     kalman.update((0.0, 0.0), dt=0.1)
     kalman.update((10.0, 0.0), dt=0.1)
 
-    for i in range(30):
+    for _i in range(30):
         result = kalman.predict(0.1)
         assert result is not None
     # Velocity should not have decayed since decay_start > 30

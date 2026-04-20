@@ -1,6 +1,6 @@
 """Tests for WP1-WP8 tracking improvements."""
-from __future__ import annotations
 
+from __future__ import annotations
 
 import numpy as np
 import pytest
@@ -13,7 +13,6 @@ from src.config import (
 )
 from src.shared.types import Detection
 from src.tracking.bytetrack import ByteTracker
-
 
 # ── WP1: Birth hysteresis ───────────────────────────────────────────────
 
@@ -63,9 +62,13 @@ class TestBirthHysteresis:
         det = [Detection(bbox=np.array([0, 0, 10, 10]), score=0.9)]
         tracker.update(det, timestamp_ns=1)
         assert len(tracker._tentative) == 1
-        tracks = tracker.update([Detection(bbox=np.array([1, 0, 11, 10]), score=0.9)], timestamp_ns=2)
+        tracks = tracker.update(
+            [Detection(bbox=np.array([1, 0, 11, 10]), score=0.9)], timestamp_ns=2
+        )
         assert len(tracks) == 0  # age=2, need 3
-        tracks = tracker.update([Detection(bbox=np.array([2, 0, 12, 10]), score=0.9)], timestamp_ns=3)
+        tracks = tracker.update(
+            [Detection(bbox=np.array([2, 0, 12, 10]), score=0.9)], timestamp_ns=3
+        )
         assert len(tracks) == 1  # age=3, promoted!
 
     def test_reset_clears_tentative(self):
@@ -149,8 +152,8 @@ class TestKalmanTuning:
 
 # ── S4: Slew-aware adaptive freeze ──────────────────────────────────────
 
-from src.tracking.adaptive import AdaptiveController
 from src.config import AdaptiveConfig, TrackingConfig
+from src.tracking.adaptive import AdaptiveController
 
 
 @pytest.mark.unit

@@ -98,7 +98,9 @@ class ByteTracker:
                         track_id=self._next_track_id,
                         bbox=detection.bbox.copy(),
                         score=float(detection.score),
-                        keypoints=None if detection.keypoints is None else detection.keypoints.copy(),
+                        keypoints=(
+                            None if detection.keypoints is None else detection.keypoints.copy()
+                        ),
                         age=1,
                         lost_frames=0,
                         last_timestamp_ns=timestamp_ns,
@@ -118,9 +120,7 @@ class ByteTracker:
                     det = tent_dets[det_idx]
                     tent_track.bbox = det.bbox.copy()
                     tent_track.score = float(det.score)
-                    tent_track.keypoints = (
-                        None if det.keypoints is None else det.keypoints.copy()
-                    )
+                    tent_track.keypoints = None if det.keypoints is None else det.keypoints.copy()
                     tent_track.age += 1
                     tent_track.last_timestamp_ns = timestamp_ns
                 # Promote tentative tracks that reached birth_min_hits
@@ -131,17 +131,12 @@ class ByteTracker:
                         self._tracks.append(tent_track)
                         promoted.add(tent_idx)
                 # Remove unmatched tentative tracks (one miss = discard)
-                surviving_tent = {
-                    idx for idx, _ in tent_matches
-                } - promoted
+                surviving_tent = {idx for idx, _ in tent_matches} - promoted
                 self._tentative = [
-                    self._tentative[i] for i in range(len(self._tentative))
-                    if i in surviving_tent
+                    self._tentative[i] for i in range(len(self._tentative)) if i in surviving_tent
                 ]
                 # Remaining unmatched detections become new tentative
-                unmatched_new_detections = [
-                    unmatched_new_detections[i] for i in unmatched_det
-                ]
+                unmatched_new_detections = [unmatched_new_detections[i] for i in unmatched_det]
             else:
                 self._tentative = []
 
@@ -152,7 +147,9 @@ class ByteTracker:
                         track_id=self._next_track_id,
                         bbox=detection.bbox.copy(),
                         score=float(detection.score),
-                        keypoints=None if detection.keypoints is None else detection.keypoints.copy(),
+                        keypoints=(
+                            None if detection.keypoints is None else detection.keypoints.copy()
+                        ),
                         age=1,
                         lost_frames=0,
                         last_timestamp_ns=timestamp_ns,

@@ -1,29 +1,28 @@
 import pytest
 
 from src.shared.protocol import (
-    PACKET_V2_SIZE,
+    CAL_CMD_GET_OFFSETS,
+    CAL_CMD_RESET_DEFAULTS,
+    CAL_CMD_SET_OFFSETS,
+    CAL_PACKET_SIZE,
     FLAG_FAST_MOTION,
     FLAG_HIGH_CONFIDENCE,
     FLAG_OCCLUSION_RECOVERY,
     FLAG_TARGET_ACQUIRED,
+    HEADER_CAL,
+    PACKET_V2_SIZE,
     STATE_CENTER,
     STATE_LOST,
     STATE_MEASUREMENT,
     STATE_PREDICTION,
     build_state_flags,
+    decode_cal_response,
     decode_packet_v2,
-    encode_packet_v2,
-    CAL_PACKET_SIZE,
-    HEADER_CAL,
-    CAL_CMD_SET_OFFSETS,
-    CAL_CMD_GET_OFFSETS,
-    CAL_CMD_RESET_DEFAULTS,
-    encode_cal_set_offsets,
     encode_cal_get_offsets,
     encode_cal_reset_defaults,
-    decode_cal_response,
+    encode_cal_set_offsets,
+    encode_packet_v2,
 )
-
 
 # --- v2 protocol tests ---
 
@@ -31,6 +30,7 @@ from src.shared.protocol import (
 @pytest.mark.unit
 def test_v2_packet_size() -> None:
     assert PACKET_V2_SIZE == 21
+
 
 @pytest.mark.unit
 def test_v2_round_trip() -> None:
@@ -65,28 +65,48 @@ def test_v2_round_trip() -> None:
 
 @pytest.mark.unit
 def test_v2_rejects_corruption() -> None:
-    packet = bytearray(encode_packet_v2(
-        sequence=1, timestamp_ms=2, pan=3, tilt=4,
-        pan_vel=5, tilt_vel=6, confidence=7, state=8, quality=9, latency=10,
-    ))
+    packet = bytearray(
+        encode_packet_v2(
+            sequence=1,
+            timestamp_ms=2,
+            pan=3,
+            tilt=4,
+            pan_vel=5,
+            tilt_vel=6,
+            confidence=7,
+            state=8,
+            quality=9,
+            latency=10,
+        )
+    )
     packet[-1] ^= 0xFF
     assert decode_packet_v2(bytes(packet)) is None
 
 
 @pytest.mark.unit
 def test_v2_rejects_wrong_header() -> None:
-    packet = bytearray(encode_packet_v2(
-        sequence=1, timestamp_ms=2, pan=3, tilt=4,
-        pan_vel=5, tilt_vel=6, confidence=7, state=8, quality=9, latency=10,
-    ))
+    packet = bytearray(
+        encode_packet_v2(
+            sequence=1,
+            timestamp_ms=2,
+            pan=3,
+            tilt=4,
+            pan_vel=5,
+            tilt_vel=6,
+            confidence=7,
+            state=8,
+            quality=9,
+            latency=10,
+        )
+    )
     packet[0] = 0xAA  # v1 header
     assert decode_packet_v2(bytes(packet)) is None
 
 
 @pytest.mark.unit
 def test_v2_rejects_wrong_size() -> None:
-    assert decode_packet_v2(b"\xBB" * 10) is None
-    assert decode_packet_v2(b"\xBB" * 21) is None
+    assert decode_packet_v2(b"\xbb" * 10) is None
+    assert decode_packet_v2(b"\xbb" * 21) is None
 
 
 @pytest.mark.unit
@@ -94,14 +114,14 @@ def test_v2_clamps_values() -> None:
     packet = encode_packet_v2(
         sequence=0,
         timestamp_ms=0,
-        pan=40000,       # exceeds int16 max
-        tilt=-40000,     # exceeds int16 min
+        pan=40000,  # exceeds int16 max
+        tilt=-40000,  # exceeds int16 min
         pan_vel=0,
         tilt_vel=0,
         confidence=300,  # exceeds uint8
         state=0,
         quality=0,
-        latency=999,     # exceeds uint8
+        latency=999,  # exceeds uint8
     )
     decoded = decode_packet_v2(packet)
     assert decoded is not None
@@ -114,9 +134,16 @@ def test_v2_clamps_values() -> None:
 @pytest.mark.unit
 def test_v2_negative_velocity() -> None:
     packet = encode_packet_v2(
-        sequence=0, timestamp_ms=0, pan=0, tilt=0,
-        pan_vel=-15000, tilt_vel=-20000,
-        confidence=0, state=0, quality=0, latency=0,
+        sequence=0,
+        timestamp_ms=0,
+        pan=0,
+        tilt=0,
+        pan_vel=-15000,
+        tilt_vel=-20000,
+        confidence=0,
+        state=0,
+        quality=0,
+        latency=0,
     )
     decoded = decode_packet_v2(packet)
     assert decoded is not None
@@ -255,8 +282,8 @@ def test_cal_rejects_wrong_header() -> None:
 
 @pytest.mark.unit
 def test_cal_rejects_wrong_size() -> None:
-    assert decode_cal_response(b"\xCC" * 5) is None
-    assert decode_cal_response(b"\xCC" * 15) is None
+    assert decode_cal_response(b"\xcc" * 5) is None
+    assert decode_cal_response(b"\xcc" * 15) is None
 
 
 @pytest.mark.unit

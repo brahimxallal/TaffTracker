@@ -85,9 +85,7 @@ class KalmanFilter:
 
     def _reset_to_measurement(self, z: np.ndarray) -> None:
         """Hard-reset state to the given measurement, preserving initialization."""
-        self._state = np.array(
-            [[float(z[0, 0])], [float(z[1, 0])], [0.0], [0.0]], dtype=np.float64
-        )
+        self._state = np.array([[float(z[0, 0])], [float(z[1, 0])], [0.0], [0.0]], dtype=np.float64)
         self._covariance = np.eye(4, dtype=np.float64) * 500.0
         self._consecutive_predictions = 0
         self._last_innovation_gated = False

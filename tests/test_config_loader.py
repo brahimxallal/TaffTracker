@@ -1,4 +1,5 @@
 """Tests for config.yaml loading and CLI override logic."""
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -58,6 +59,7 @@ class TestConfigLoader:
     def test_human_config_uses_plain_defaults(self):
         config = build_config_from_yaml({"target": "human"})
         from src.config import TrackingConfig
+
         # After FPS adaptation, check nested configs are preserved
         assert config.tracking.kalman == TrackingConfig().kalman
 
@@ -142,7 +144,9 @@ class TestConfigLoader:
         assert config.tracking.hold_time_s == 3.0
 
     def test_runtime_flags_from_yaml(self):
-        yaml_data = {"runtime": {"debug": True, "headless": True, "profile": True, "log_level": "DEBUG"}}
+        yaml_data = {
+            "runtime": {"debug": True, "headless": True, "profile": True, "log_level": "DEBUG"}
+        }
         config = build_config_from_yaml(yaml_data)
         assert config.flags.debug is True
         assert config.flags.headless is True

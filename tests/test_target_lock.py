@@ -1,13 +1,12 @@
 """Tests for target locking in TrackerStage.select_primary_track."""
-from __future__ import annotations
 
-import multiprocessing as mp
+from __future__ import annotations
 
 import numpy as np
 import pytest
 
 from src.inference.postprocess import KeypointStabilizer
-from src.inference.stages.tracker import TrackerStage, _MAX_CACHED_TRACKS
+from src.inference.stages.tracker import _MAX_CACHED_TRACKS, TrackerStage
 from src.shared.types import Track
 from src.tracking.botsort import BoTSORT
 from src.tracking.kalman import KalmanFilter
@@ -197,7 +196,9 @@ class TestMultiDogLockStability:
         assert state_before is not None
 
         # Save track 1 state
-        stage.save_track_state(1, ema_pixel.snapshot(), servo_ema_pixel.snapshot(), timestamp_ns=1000)
+        stage.save_track_state(
+            1, ema_pixel.snapshot(), servo_ema_pixel.snapshot(), timestamp_ns=1000
+        )
         assert 1 in stage._track_state_cache
 
         # Simulate switching to track 2 — reset filters
@@ -206,7 +207,9 @@ class TestMultiDogLockStability:
         ema_pixel.x_prev = None
 
         # Restore track 1
-        restored = stage.restore_track_state(1, ema_pixel, servo_ema_pixel, current_timestamp_ns=2000)
+        restored = stage.restore_track_state(
+            1, ema_pixel, servo_ema_pixel, current_timestamp_ns=2000
+        )
         assert restored is True
         assert 1 not in stage._track_state_cache  # consumed from cache
 
@@ -226,7 +229,9 @@ class TestMultiDogLockStability:
 
         # Fill cache to max + 1
         for i in range(_MAX_CACHED_TRACKS + 1):
-            stage.save_track_state(i, ema_pixel.snapshot(), servo_ema_pixel.snapshot(), timestamp_ns=i * 1000)
+            stage.save_track_state(
+                i, ema_pixel.snapshot(), servo_ema_pixel.snapshot(), timestamp_ns=i * 1000
+            )
 
         assert len(stage._track_state_cache) == _MAX_CACHED_TRACKS
         # Oldest (track_id=0, timestamp_ns=0) should have been evicted
@@ -245,8 +250,12 @@ class TestMultiDogLockStability:
 
         # Simulate lock change path (no cache hit, no re-ID match)
         stage.kalman.update((100.0, 100.0), dt=0.016)
-        stage.save_track_state(1, ema_pixel.snapshot(), servo_ema_pixel.snapshot(), timestamp_ns=1000)
-        restored = stage.restore_track_state(99, ema_pixel, servo_ema_pixel, current_timestamp_ns=2000)
+        stage.save_track_state(
+            1, ema_pixel.snapshot(), servo_ema_pixel.snapshot(), timestamp_ns=1000
+        )
+        restored = stage.restore_track_state(
+            99, ema_pixel, servo_ema_pixel, current_timestamp_ns=2000
+        )
         assert restored is False
 
         # After reset without cache hit, EMA should NOT be None (M4)

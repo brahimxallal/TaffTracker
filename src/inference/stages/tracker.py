@@ -5,10 +5,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from src.inference.postprocess import KeypointStabilizer
 from src.tracking.botsort import BoTSORT
 from src.tracking.kalman import KalmanFilter
 from src.tracking.reid import ReIDBuffer
-from src.inference.postprocess import KeypointStabilizer
 
 LOGGER = logging.getLogger("inference.tracker")
 
@@ -114,7 +114,9 @@ class TrackerStage:
                         return t, False
             elif candidates:
                 self._locked_track_id = candidates[0].track_id
-                LOGGER.info("Cycle target: only 1 candidate, locked track_id=%d", candidates[0].track_id)
+                LOGGER.info(
+                    "Cycle target: only 1 candidate, locked track_id=%d", candidates[0].track_id
+                )
                 return candidates[0], False
 
         # If we have a locked target, prefer it
@@ -134,8 +136,10 @@ class TrackerStage:
                         continue
                     cx = (track.bbox[0] + track.bbox[2]) * 0.5
                     cy = (track.bbox[1] + track.bbox[3]) * 0.5
-                    dist = ((cx - self._last_locked_centroid[0]) ** 2
-                            + (cy - self._last_locked_centroid[1]) ** 2) ** 0.5
+                    dist = (
+                        (cx - self._last_locked_centroid[0]) ** 2
+                        + (cy - self._last_locked_centroid[1]) ** 2
+                    ) ** 0.5
                     if dist < best_dist:
                         best_dist = dist
                         best_prox = track
@@ -145,7 +149,9 @@ class TrackerStage:
                     self._proximity_transfer = True
                     LOGGER.debug(
                         "Proximity transfer: %d -> %d (%.1fpx)",
-                        old_id, best_prox.track_id, best_dist,
+                        old_id,
+                        best_prox.track_id,
+                        best_dist,
                     )
                     return best_prox, False
 
@@ -197,7 +203,9 @@ class TrackerStage:
             candidates_str = ", ".join(
                 f"id={t.track_id} lost={t.lost_frames} score={t.score:.2f}" for t in tracks
             )
-            LOGGER.debug("Re-lock candidates: [%s] -> selected id=%d", candidates_str, best.track_id)
+            LOGGER.debug(
+                "Re-lock candidates: [%s] -> selected id=%d", candidates_str, best.track_id
+            )
         LOGGER.info("Target locked: track_id=%d", best.track_id)
         return best, False
 

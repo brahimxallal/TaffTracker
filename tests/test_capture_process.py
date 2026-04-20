@@ -210,6 +210,7 @@ def test_rewind_returns_none_when_both_fail(monkeypatch) -> None:
     class _FailedCapture:
         def isOpened(self):
             return False
+
         def release(self):
             pass
 
@@ -324,7 +325,11 @@ def test_open_capture_no_warn_within_5pct(monkeypatch, caplog) -> None:
     process = _build_capture_process(
         source="0",
         camera_config=CameraConfig(
-            width=640, height=640, fps=60, capture_width=1920, capture_height=1080,
+            width=640,
+            height=640,
+            fps=60,
+            capture_width=1920,
+            capture_height=1080,
         ),
     )
 
@@ -408,6 +413,7 @@ def test_run_captures_frames_with_letterbox(monkeypatch) -> None:
     # Set shutdown after 3 frames via frame count check.
     original_write = ring_buffer.write
     write_count = [0]
+
     def counting_write(frame, ts):
         original_write(frame, ts)
         write_count[0] += 1
@@ -453,10 +459,13 @@ def test_run_stream_retries_on_read_failure(monkeypatch) -> None:
     class _RetryCapture:
         def isOpened(self):
             return True
+
         def get(self, prop_id):
             return 8.0 if prop_id != cv2.CAP_PROP_FPS else 30.0
+
         def set(self, *args):
             return True
+
         def read(self):
             if read_idx[0] < len(read_results):
                 result = read_results[read_idx[0]]
@@ -464,6 +473,7 @@ def test_run_stream_retries_on_read_failure(monkeypatch) -> None:
                 return result
             shutdown_event.set()
             return False, None
+
         def release(self):
             pass
 
@@ -474,10 +484,12 @@ def test_run_stream_retries_on_read_failure(monkeypatch) -> None:
     write_count = [0]
     mock_rb = SharedRingBuffer.attach(ring_buffer.layout, write_index)
     original_write = mock_rb.write
+
     def counting_write(frame, ts):
         original_write(frame, ts)
         write_count[0] += 1
         shutdown_event.set()
+
     mock_rb.write = counting_write
     monkeypatch.setattr("src.capture.process.SharedRingBuffer.attach", lambda layout, wi: mock_rb)
 
@@ -513,11 +525,13 @@ def test_run_fps_logging_triggers_at_300(monkeypatch) -> None:
     write_count = [0]
     mock_rb = SharedRingBuffer.attach(ring_buffer.layout, write_index)
     original_write = mock_rb.write
+
     def counting_write(f, ts):
         original_write(f, ts)
         write_count[0] += 1
         if write_count[0] >= 301:
             shutdown_event.set()
+
     mock_rb.write = counting_write
     monkeypatch.setattr("src.capture.process.SharedRingBuffer.attach", lambda layout, wi: mock_rb)
 
@@ -526,6 +540,7 @@ def test_run_fps_logging_triggers_at_300(monkeypatch) -> None:
     # Should have processed 301 frames, FPS counter was reset at 300
     assert proc._frame_count == 1  # reset to 0 at 300, then +1
     ring_buffer.cleanup()
+
 
 @pytest.mark.unit
 def test_run_file_source_rewinds_on_exhaustion(monkeypatch, tmp_path) -> None:
@@ -591,9 +606,11 @@ def test_run_file_source_rewinds_on_exhaustion(monkeypatch, tmp_path) -> None:
     write_count = [0]
     mock_rb = SharedRingBuffer.attach(ring_buffer.layout, write_index)
     original_write = mock_rb.write
+
     def counting_write(frame, ts):
         original_write(frame, ts)
         write_count[0] += 1
+
     mock_rb.write = counting_write
     monkeypatch.setattr("src.capture.process.SharedRingBuffer.attach", lambda layout, wi: mock_rb)
 
@@ -625,21 +642,27 @@ def test_run_file_source_stops_on_failed_rewind(monkeypatch, tmp_path) -> None:
     class _ExhaustCapture:
         def isOpened(self):
             return True
+
         def get(self, prop_id):
             if prop_id == cv2.CAP_PROP_FPS:
                 return 30.0
             return 8.0
+
         def set(self, *args):
             return True
+
         def read(self):
             return False, None  # immediately exhausted
+
         def release(self):
             pass
 
     monkeypatch.setattr(proc, "_open_capture", lambda: _ExhaustCapture())
     monkeypatch.setattr(proc, "_rewind_file_capture", lambda cap: None)  # rewind fails
-    mock_rb_cls = type('MockRB', (), {'close': lambda self: None})
-    monkeypatch.setattr("src.capture.process.SharedRingBuffer.attach", lambda layout, wi: mock_rb_cls())
+    mock_rb_cls = type("MockRB", (), {"close": lambda self: None})
+    monkeypatch.setattr(
+        "src.capture.process.SharedRingBuffer.attach", lambda layout, wi: mock_rb_cls()
+    )
 
     proc.run()
 
@@ -674,10 +697,12 @@ def test_run_padding_only_path(monkeypatch) -> None:
     written = []
     mock_rb = SharedRingBuffer.attach(ring_buffer.layout, write_index)
     original_write = mock_rb.write
+
     def capture_write(frame, ts):
         written.append(frame.copy())
         original_write(frame, ts)
         shutdown_event.set()
+
     mock_rb.write = capture_write
     monkeypatch.setattr("src.capture.process.SharedRingBuffer.attach", lambda layout, wi: mock_rb)
 
@@ -686,8 +711,9 @@ def test_run_padding_only_path(monkeypatch) -> None:
     assert len(written) == 1
     # Center pixels should have our value (77), edge padding should be 114
     assert written[0][0, 0, 0] == 114  # left pad
-    assert written[0][0, 1, 0] == 77   # content starts at pad_left=1
+    assert written[0][0, 1, 0] == 77  # content starts at pad_left=1
     ring_buffer.cleanup()
+
 
 @pytest.mark.unit
 def test_run_no_resize_when_same_size(monkeypatch) -> None:
@@ -712,6 +738,7 @@ def test_run_no_resize_when_same_size(monkeypatch) -> None:
     mock_rb = SharedRingBuffer.attach(ring_buffer.layout, write_index)
     original_write = mock_rb.write
     written = []
+
     def capture_write(frame, ts):
         written.append(frame.copy())
         original_write(frame, ts)
@@ -745,9 +772,13 @@ def test_run_exception_reports_error(monkeypatch) -> None:
         error_queue=error_queue,
     )
 
-    monkeypatch.setattr(proc, "_open_capture", lambda: (_ for _ in ()).throw(RuntimeError("no camera")))
-    mock_rb_cls = type('MockRB', (), {'close': lambda self: None})
-    monkeypatch.setattr("src.capture.process.SharedRingBuffer.attach", lambda layout, wi: mock_rb_cls())
+    monkeypatch.setattr(
+        proc, "_open_capture", lambda: (_ for _ in ()).throw(RuntimeError("no camera"))
+    )
+    mock_rb_cls = type("MockRB", (), {"close": lambda self: None})
+    monkeypatch.setattr(
+        "src.capture.process.SharedRingBuffer.attach", lambda layout, wi: mock_rb_cls()
+    )
 
     proc.run()
 
@@ -778,8 +809,10 @@ def test_run_shutdown_event_exits_immediately(monkeypatch) -> None:
 
     mock_cap = _FrameCapture([])
     monkeypatch.setattr(proc, "_open_capture", lambda: mock_cap)
-    mock_rb_cls = type('MockRB', (), {'close': lambda self: None})
-    monkeypatch.setattr("src.capture.process.SharedRingBuffer.attach", lambda layout, wi: mock_rb_cls())
+    mock_rb_cls = type("MockRB", (), {"close": lambda self: None})
+    monkeypatch.setattr(
+        "src.capture.process.SharedRingBuffer.attach", lambda layout, wi: mock_rb_cls()
+    )
 
     proc.run()
 

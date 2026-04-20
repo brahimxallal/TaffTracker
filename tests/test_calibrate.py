@@ -3,10 +3,10 @@ from __future__ import annotations
 import pytest
 
 from scripts.calibrate import (
-    MANUAL_JOG_FAST_STEP_DEG,
-    MANUAL_JOG_STEP_DEG,
     _KEY_LEFT,
     _KEY_UP,
+    MANUAL_JOG_FAST_STEP_DEG,
+    MANUAL_JOG_STEP_DEG,
     parse_jog_key,
 )
 

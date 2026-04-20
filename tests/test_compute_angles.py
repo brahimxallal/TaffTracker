@@ -6,7 +6,6 @@ import pytest
 
 from src.calibration.camera_model import CameraModel
 
-
 # ── _compute_angles is a method on InferenceProcess, but we can test
 #    the underlying CameraModel.pixel_to_angle + pixel_to_angle_with_parallax
 #    directly since _compute_angles just dispatches to them. ─────────
@@ -74,7 +73,12 @@ def test_parallax_zero_offset_matches_direct(model_640x480: CameraModel) -> None
     depth = 3.0
     pan_direct, tilt_direct = model_640x480.pixel_to_angle(px, py)
     pan_par, tilt_par = model_640x480.pixel_to_angle_with_parallax(
-        px, py, depth, 0.0, 0.0, 0.0,
+        px,
+        py,
+        depth,
+        0.0,
+        0.0,
+        0.0,
     )
     assert abs(pan_direct - pan_par) < 1e-6
     assert abs(tilt_direct - tilt_par) < 1e-6
@@ -88,7 +92,12 @@ def test_parallax_with_offset_shifts_angles(model_640x480: CameraModel) -> None:
     px, py = 320.0, 240.0  # center pixel → zero direct angles
     depth = 3.0
     pan_par, tilt_par = model_640x480.pixel_to_angle_with_parallax(
-        px, py, depth, 0.05, 0.0, 0.0,  # camera 5cm right of gimbal
+        px,
+        py,
+        depth,
+        0.05,
+        0.0,
+        0.0,  # camera 5cm right of gimbal
     )
     # Gimbal should aim slightly left (negative pan) to compensate
     assert pan_par < 0
@@ -102,10 +111,20 @@ def test_parallax_decreases_with_depth(model_640x480: CameraModel) -> None:
     px, py = 320.0, 240.0
     _, _, offset_x = 0.0, 0.0, 0.05
     pan_near, _ = model_640x480.pixel_to_angle_with_parallax(
-        px, py, 1.0, offset_x, 0.0, 0.0,
+        px,
+        py,
+        1.0,
+        offset_x,
+        0.0,
+        0.0,
     )
     pan_far, _ = model_640x480.pixel_to_angle_with_parallax(
-        px, py, 10.0, offset_x, 0.0, 0.0,
+        px,
+        py,
+        10.0,
+        offset_x,
+        0.0,
+        0.0,
     )
     # At greater depth, parallax correction should be smaller
     assert abs(pan_far) < abs(pan_near)
@@ -119,7 +138,12 @@ def test_parallax_fallback_when_behind(model_640x480: CameraModel) -> None:
     px, py = 400.0, 300.0
     # z_cam = depth, offset_z > depth → z_g < 0
     pan_par, tilt_par = model_640x480.pixel_to_angle_with_parallax(
-        px, py, depth_m=1.0, offset_x=0.0, offset_y=0.0, offset_z=2.0,
+        px,
+        py,
+        depth_m=1.0,
+        offset_x=0.0,
+        offset_y=0.0,
+        offset_z=2.0,
     )
     pan_direct, tilt_direct = model_640x480.pixel_to_angle(px, py)
     assert abs(pan_par - pan_direct) < 1e-6

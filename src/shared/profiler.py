@@ -1,14 +1,14 @@
 from __future__ import annotations
 
 import csv
+import math
+import threading
 from collections import defaultdict, deque
+from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-import math
 from pathlib import Path
 from time import perf_counter_ns
-from typing import Iterator
-import threading
 
 
 @dataclass(frozen=True)

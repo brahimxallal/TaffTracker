@@ -5,12 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-import pytest
-
 from src.calibration.laser_boresight import LaserBoresight, load_boresight, save_boresight
 from src.calibration.laser_calibrator import (
-    CalibrationState,
-    LaserCalibrator,
     _KEY_DOWN,
     _KEY_ENTER,
     _KEY_ESC,
@@ -18,9 +14,10 @@ from src.calibration.laser_calibrator import (
     _KEY_RIGHT,
     _KEY_UP,
     _SHIFT_MASK,
+    CalibrationState,
+    LaserCalibrator,
 )
 from src.config import LaserBoresightConfig, Orientation
-
 
 # ── LaserBoresight persistence ──────────────────────────────────────────
 
@@ -66,7 +63,9 @@ class TestBoresightRoundtrip:
 
 
 class TestLaserCalibrator:
-    def _make_calibrator(self, tmp_path: Path, pan: float = 0.0, tilt: float = 0.0) -> LaserCalibrator:
+    def _make_calibrator(
+        self, tmp_path: Path, pan: float = 0.0, tilt: float = 0.0
+    ) -> LaserCalibrator:
         return LaserCalibrator(
             save_path=tmp_path / "servo_limits.json",
             initial=LaserBoresight(pan_offset_deg=pan, tilt_offset_deg=tilt),
@@ -151,41 +150,49 @@ class TestLaserCalibrator:
 class TestOrientationParsing:
     def test_parse_landscape_native(self) -> None:
         from src.config_loader import _parse_orientation
+
         result = _parse_orientation({"orientation": "landscape_native"})
         assert result is Orientation.LANDSCAPE_NATIVE
 
     def test_parse_portrait(self) -> None:
         from src.config_loader import _parse_orientation
+
         result = _parse_orientation({"orientation": "portrait"})
         assert result is Orientation.PORTRAIT
 
     def test_legacy_portrait_mode_true(self) -> None:
         from src.config_loader import _parse_orientation
+
         result = _parse_orientation({"portrait_mode": True})
         assert result is Orientation.PORTRAIT
 
     def test_legacy_portrait_mode_false(self) -> None:
         from src.config_loader import _parse_orientation
+
         result = _parse_orientation({"portrait_mode": False})
         assert result is Orientation.LANDSCAPE_NATIVE
 
     def test_explicit_orientation_beats_legacy(self) -> None:
         from src.config_loader import _parse_orientation
+
         result = _parse_orientation({"orientation": "landscape_native", "portrait_mode": True})
         assert result is Orientation.LANDSCAPE_NATIVE
 
     def test_default_is_landscape(self) -> None:
         from src.config_loader import _parse_orientation
+
         result = _parse_orientation({})
         assert result is Orientation.LANDSCAPE_NATIVE
 
     def test_unknown_orientation_falls_back(self) -> None:
         from src.config_loader import _parse_orientation
+
         result = _parse_orientation({"orientation": "upside_down"})
         assert result is Orientation.LANDSCAPE_NATIVE
 
     def test_portrait_mode_property_compat(self) -> None:
         from src.config import CameraConfig
+
         cam_p = CameraConfig(orientation=Orientation.PORTRAIT)
         assert cam_p.portrait_mode is True
         cam_l = CameraConfig(orientation=Orientation.LANDSCAPE_NATIVE)

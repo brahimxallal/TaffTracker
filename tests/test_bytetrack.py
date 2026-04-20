@@ -21,7 +21,9 @@ def test_bytetrack_preserves_track_id_for_continuous_motion() -> None:
 
 @pytest.mark.unit
 def test_bytetrack_keeps_track_alive_with_low_confidence_match() -> None:
-    tracker = ByteTracker(track_thresh=0.5, low_thresh=0.2, match_thresh=0.3, max_lost=2, birth_min_hits=1)
+    tracker = ByteTracker(
+        track_thresh=0.5, low_thresh=0.2, match_thresh=0.3, max_lost=2, birth_min_hits=1
+    )
     tracker.update([Detection(bbox=np.array([0, 0, 10, 10]), score=0.9)], timestamp_ns=1)
 
     tracks = tracker.update([Detection(bbox=np.array([1, 0, 11, 10]), score=0.3)], timestamp_ns=2)

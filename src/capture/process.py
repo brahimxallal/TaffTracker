@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from pathlib import Path
 import logging
 import multiprocessing as mp
 import time
+from pathlib import Path
 from traceback import format_exc
 
 import cv2
@@ -12,7 +12,6 @@ import numpy as np
 from src.config import CameraConfig
 from src.shared.ring_buffer import RingBufferLayout, SharedRingBuffer
 from src.shared.types import ProcessErrorReport
-
 
 LOGGER = logging.getLogger("capture")
 

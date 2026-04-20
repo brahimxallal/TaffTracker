@@ -8,7 +8,6 @@ from src.config import PostprocessConfig
 from src.shared.pose_schema import PoseSchema
 from src.shared.types import Detection
 
-
 # Default config instance for backward compatibility (used as defaults in function signatures).
 _DEFAULT_PP = PostprocessConfig()
 
@@ -179,7 +178,7 @@ def _extract_weighted_centroid(
     if not valid_indices:
         return None
 
-    points = np.array(list(zip(xs, ys)), dtype=np.float32)
+    points = np.array(list(zip(xs, ys, strict=True)), dtype=np.float32)
     confs = np.array(raw_confs, dtype=np.float32)
 
     # Temporal confidence smoothing

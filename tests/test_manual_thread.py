@@ -68,12 +68,12 @@ def test_manual_emits_at_100hz():
 
         # At 100 Hz for 0.5s → expect ~50 packets (allow ±30% for scheduling)
         call_count = sender.send.call_count
-        assert call_count >= 35, (
-            f"Manual thread too slow: {call_count} packets in 0.5s (expected ≥35)"
-        )
-        assert call_count <= 70, (
-            f"Manual thread too fast: {call_count} packets in 0.5s (expected ≤70)"
-        )
+        assert (
+            call_count >= 35
+        ), f"Manual thread too slow: {call_count} packets in 0.5s (expected ≥35)"
+        assert (
+            call_count <= 70
+        ), f"Manual thread too fast: {call_count} packets in 0.5s (expected ≤70)"
     finally:
         layout.cleanup()
 
@@ -104,9 +104,9 @@ def test_auto_mode_thread_idle():
         shutdown.set()
         thread.join(timeout=1.0)
 
-        assert sender.send.call_count == 0, (
-            f"Thread emitted {sender.send.call_count} packets while manual_mode=0"
-        )
+        assert (
+            sender.send.call_count == 0
+        ), f"Thread emitted {sender.send.call_count} packets while manual_mode=0"
     finally:
         layout.cleanup()
 
@@ -143,9 +143,9 @@ def test_manual_thread_stops_on_mode_switch():
         time.sleep(0.2)
 
         # Should have emitted 0 or very few (one straggler at most)
-        assert sender.send.call_count <= 1, (
-            f"Thread still emitting after mode switch: {sender.send.call_count} packets"
-        )
+        assert (
+            sender.send.call_count <= 1
+        ), f"Thread still emitting after mode switch: {sender.send.call_count} packets"
 
         shutdown.set()
         thread.join(timeout=1.0)

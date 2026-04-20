@@ -1,20 +1,25 @@
 """Tests for src.laser.detector — laser dot detection by brightness peak."""
+
 from __future__ import annotations
 
+import cv2
 import numpy as np
 import pytest
-import cv2
 
 from src.config import LaserConfig
-from src.laser.detector import LaserDetector, LaserDetection
+from src.laser.detector import LaserDetection, LaserDetector
 
 
-def _make_frame(w: int = 640, h: int = 480, color: tuple[int, int, int] = (40, 40, 40)) -> np.ndarray:
+def _make_frame(
+    w: int = 640, h: int = 480, color: tuple[int, int, int] = (40, 40, 40)
+) -> np.ndarray:
     frame = np.full((h, w, 3), color, dtype=np.uint8)
     return frame
 
 
-def _draw_dot(frame: np.ndarray, center: tuple[int, int], radius: int, bgr: tuple[int, int, int]) -> None:
+def _draw_dot(
+    frame: np.ndarray, center: tuple[int, int], radius: int, bgr: tuple[int, int, int]
+) -> None:
     cv2.circle(frame, center, radius, bgr, -1)
 
 

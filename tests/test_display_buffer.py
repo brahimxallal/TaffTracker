@@ -1,4 +1,5 @@
 """Tests for SharedDisplayBuffer — single-slot shared memory display transport."""
+
 from __future__ import annotations
 
 import multiprocessing as mp

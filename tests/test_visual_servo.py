@@ -1,15 +1,17 @@
 """Tests for visual servo controller (PID + state machine)."""
+
 from __future__ import annotations
 
-import pytest
 from math import radians
 
-from src.tracking.visual_servo import PIDAxis, ServoMode, VisualServoController
+import pytest
 
+from src.tracking.visual_servo import PIDAxis, ServoMode, VisualServoController
 
 # ---------------------------------------------------------------------------
 # PIDAxis tests
 # ---------------------------------------------------------------------------
+
 
 class TestPIDAxis:
 
@@ -54,9 +56,12 @@ class TestPIDAxis:
 # VisualServoController tests
 # ---------------------------------------------------------------------------
 
+
 def _make_controller(**kwargs) -> VisualServoController:
     defaults = dict(
-        kp=0.5, ki=0.0, kd=0.0,
+        kp=0.5,
+        ki=0.0,
+        kd=0.0,
         integral_limit_deg=5.0,
         max_correction_deg=45.0,
         entry_threshold_frames=3,
@@ -79,9 +84,11 @@ class TestVisualServoStateMachine:
         ctrl = _make_controller()
         for _ in range(20):
             state = ctrl.update(
-                target_pixel=(320, 240), laser_pixel=None,
+                target_pixel=(320, 240),
+                laser_pixel=None,
                 open_loop_angles_rad=(0.0, 0.0),
-                target_acquired=True, dt=0.016,
+                target_acquired=True,
+                dt=0.016,
             )
         assert state.mode == ServoMode.ACQUISITION
 
@@ -90,9 +97,11 @@ class TestVisualServoStateMachine:
         # Laser near target for 3 frames
         for _ in range(3):
             state = ctrl.update(
-                target_pixel=(320, 240), laser_pixel=(325, 242),
+                target_pixel=(320, 240),
+                laser_pixel=(325, 242),
                 open_loop_angles_rad=(0.0, 0.0),
-                target_acquired=True, dt=0.016,
+                target_acquired=True,
+                dt=0.016,
             )
         assert state.mode == ServoMode.VISUAL_SERVO
 
@@ -100,9 +109,11 @@ class TestVisualServoStateMachine:
         ctrl = _make_controller(entry_threshold_frames=3, association_radius_px=50.0)
         for _ in range(10):
             state = ctrl.update(
-                target_pixel=(320, 240), laser_pixel=(500, 400),  # > 50px away
+                target_pixel=(320, 240),
+                laser_pixel=(500, 400),  # > 50px away
                 open_loop_angles_rad=(0.0, 0.0),
-                target_acquired=True, dt=0.016,
+                target_acquired=True,
+                dt=0.016,
             )
         assert state.mode == ServoMode.ACQUISITION
 
@@ -111,25 +122,31 @@ class TestVisualServoStateMachine:
         # Enter VISUAL_SERVO
         for _ in range(2):
             ctrl.update(
-                target_pixel=(320, 240), laser_pixel=(322, 241),
+                target_pixel=(320, 240),
+                laser_pixel=(322, 241),
                 open_loop_angles_rad=(0.0, 0.0),
-                target_acquired=True, dt=0.016,
+                target_acquired=True,
+                dt=0.016,
             )
         # Lose laser for 3 frames
         for _ in range(3):
             state = ctrl.update(
-                target_pixel=(320, 240), laser_pixel=None,
+                target_pixel=(320, 240),
+                laser_pixel=None,
                 open_loop_angles_rad=(0.0, 0.0),
-                target_acquired=True, dt=0.016,
+                target_acquired=True,
+                dt=0.016,
             )
         assert state.mode == ServoMode.ACQUISITION
 
     def test_target_lost_goes_to_lost_mode(self):
         ctrl = _make_controller()
         state = ctrl.update(
-            target_pixel=None, laser_pixel=None,
+            target_pixel=None,
+            laser_pixel=None,
             open_loop_angles_rad=None,
-            target_acquired=False, dt=0.016,
+            target_acquired=False,
+            dt=0.016,
         )
         assert state.mode == ServoMode.LOST
 
@@ -137,24 +154,30 @@ class TestVisualServoStateMachine:
         ctrl = _make_controller()
         # Go to LOST
         ctrl.update(
-            target_pixel=None, laser_pixel=None,
+            target_pixel=None,
+            laser_pixel=None,
             open_loop_angles_rad=None,
-            target_acquired=False, dt=0.016,
+            target_acquired=False,
+            dt=0.016,
         )
         # Re-acquire target
         state = ctrl.update(
-            target_pixel=(320, 240), laser_pixel=None,
+            target_pixel=(320, 240),
+            laser_pixel=None,
             open_loop_angles_rad=(0.1, 0.05),
-            target_acquired=True, dt=0.016,
+            target_acquired=True,
+            dt=0.016,
         )
         assert state.mode == ServoMode.ACQUISITION
 
     def test_acquisition_seeds_from_open_loop(self):
         ctrl = _make_controller()
         state = ctrl.update(
-            target_pixel=(320, 240), laser_pixel=None,
+            target_pixel=(320, 240),
+            laser_pixel=None,
             open_loop_angles_rad=(radians(5.0), radians(-3.0)),
-            target_acquired=True, dt=0.016,
+            target_acquired=True,
+            dt=0.016,
         )
         assert state.commanded_pan_deg == pytest.approx(5.0)
         assert state.commanded_tilt_deg == pytest.approx(-3.0)
@@ -164,21 +187,27 @@ class TestVisualServoStateMachine:
         # 2 frames with laser, then 1 without
         for _ in range(2):
             ctrl.update(
-                target_pixel=(320, 240), laser_pixel=(322, 241),
+                target_pixel=(320, 240),
+                laser_pixel=(322, 241),
                 open_loop_angles_rad=(0.0, 0.0),
-                target_acquired=True, dt=0.016,
+                target_acquired=True,
+                dt=0.016,
             )
         ctrl.update(
-            target_pixel=(320, 240), laser_pixel=None,
+            target_pixel=(320, 240),
+            laser_pixel=None,
             open_loop_angles_rad=(0.0, 0.0),
-            target_acquired=True, dt=0.016,
+            target_acquired=True,
+            dt=0.016,
         )
         # 2 more frames — shouldn't have entered yet (counter was reset)
         for _ in range(2):
             state = ctrl.update(
-                target_pixel=(320, 240), laser_pixel=(322, 241),
+                target_pixel=(320, 240),
+                laser_pixel=(322, 241),
                 open_loop_angles_rad=(0.0, 0.0),
-                target_acquired=True, dt=0.016,
+                target_acquired=True,
+                dt=0.016,
             )
         assert state.mode == ServoMode.ACQUISITION
 
@@ -190,15 +219,19 @@ class TestVisualServoPID:
         ctrl = _make_controller(kp=0.5, ki=0.0, kd=0.0, entry_threshold_frames=1)
         # Enter VISUAL_SERVO
         ctrl.update(
-            target_pixel=(350, 240), laser_pixel=(300, 240),  # target 50px right of laser
+            target_pixel=(350, 240),
+            laser_pixel=(300, 240),  # target 50px right of laser
             open_loop_angles_rad=(0.0, 0.0),
-            target_acquired=True, dt=0.016,
+            target_acquired=True,
+            dt=0.016,
         )
         # Now in VISUAL_SERVO, PID should add positive correction
         state = ctrl.update(
-            target_pixel=(350, 240), laser_pixel=(300, 240),
+            target_pixel=(350, 240),
+            laser_pixel=(300, 240),
             open_loop_angles_rad=(0.0, 0.0),
-            target_acquired=True, dt=0.016,
+            target_acquired=True,
+            dt=0.016,
         )
         assert state.mode == ServoMode.VISUAL_SERVO
         # Error = 50px * 0.1 deg/px = 5 deg, kp=0.5 → correction = 2.5 deg
@@ -209,16 +242,20 @@ class TestVisualServoPID:
         ctrl = _make_controller(kp=0.3, ki=0.0, kd=0.0, entry_threshold_frames=1)
         # Enter VISUAL_SERVO
         ctrl.update(
-            target_pixel=(320, 240), laser_pixel=(310, 240),
+            target_pixel=(320, 240),
+            laser_pixel=(310, 240),
             open_loop_angles_rad=(0.0, 0.0),
-            target_acquired=True, dt=0.016,
+            target_acquired=True,
+            dt=0.016,
         )
         errors = []
-        for i in range(10):
+        for _i in range(10):
             state = ctrl.update(
-                target_pixel=(320, 240), laser_pixel=(310, 240),
+                target_pixel=(320, 240),
+                laser_pixel=(310, 240),
                 open_loop_angles_rad=(0.0, 0.0),
-                target_acquired=True, dt=0.016,
+                target_acquired=True,
+                dt=0.016,
             )
             errors.append(state.error_px[0])
         # Error should remain constant (10px) since we're not moving the laser,
@@ -227,20 +264,26 @@ class TestVisualServoPID:
 
     def test_max_correction_clamp(self):
         ctrl = _make_controller(
-            kp=10.0, ki=0.0, kd=0.0,
+            kp=10.0,
+            ki=0.0,
+            kd=0.0,
             entry_threshold_frames=1,
             max_correction_deg=5.0,
         )
         # Enter VISUAL_SERVO with large error
         ctrl.update(
-            target_pixel=(600, 240), laser_pixel=(100, 240),
+            target_pixel=(600, 240),
+            laser_pixel=(100, 240),
             open_loop_angles_rad=(0.0, 0.0),
-            target_acquired=True, dt=0.016,
+            target_acquired=True,
+            dt=0.016,
         )
         state = ctrl.update(
-            target_pixel=(600, 240), laser_pixel=(100, 240),
+            target_pixel=(600, 240),
+            laser_pixel=(100, 240),
             open_loop_angles_rad=(0.0, 0.0),
-            target_acquired=True, dt=0.016,
+            target_acquired=True,
+            dt=0.016,
         )
         # Should be clamped to max_correction_deg from open-loop baseline
         assert abs(state.commanded_pan_deg) <= 5.0 + 1e-6
@@ -248,31 +291,39 @@ class TestVisualServoPID:
     def test_pid_resets_on_mode_exit(self):
         """PID integral should reset when exiting VISUAL_SERVO."""
         ctrl = _make_controller(
-            kp=0.0, ki=1.0, kd=0.0,
+            kp=0.0,
+            ki=1.0,
+            kd=0.0,
             entry_threshold_frames=1,
             exit_threshold_frames=2,
         )
         # Enter VISUAL_SERVO and accumulate integral
         for _ in range(5):
             ctrl.update(
-                target_pixel=(330, 240), laser_pixel=(320, 240),
+                target_pixel=(330, 240),
+                laser_pixel=(320, 240),
                 open_loop_angles_rad=(0.0, 0.0),
-                target_acquired=True, dt=0.016,
+                target_acquired=True,
+                dt=0.016,
             )
         # Exit by losing laser
         for _ in range(2):
             ctrl.update(
-                target_pixel=(330, 240), laser_pixel=None,
+                target_pixel=(330, 240),
+                laser_pixel=None,
                 open_loop_angles_rad=(0.0, 0.0),
-                target_acquired=True, dt=0.016,
+                target_acquired=True,
+                dt=0.016,
             )
         assert ctrl.mode == ServoMode.ACQUISITION
         # Re-enter — should start fresh
         for _ in range(1):
             state = ctrl.update(
-                target_pixel=(330, 240), laser_pixel=(320, 240),
+                target_pixel=(330, 240),
+                laser_pixel=(320, 240),
                 open_loop_angles_rad=(0.0, 0.0),
-                target_acquired=True, dt=0.016,
+                target_acquired=True,
+                dt=0.016,
             )
         # With fresh PID (ki=1.0, error=10px*0.1=1deg), integral should be small
         assert state.mode == ServoMode.VISUAL_SERVO
@@ -280,14 +331,18 @@ class TestVisualServoPID:
     def test_error_px_reported(self):
         ctrl = _make_controller(entry_threshold_frames=1)
         ctrl.update(
-            target_pixel=(320, 240), laser_pixel=(310, 235),
+            target_pixel=(320, 240),
+            laser_pixel=(310, 235),
             open_loop_angles_rad=(0.0, 0.0),
-            target_acquired=True, dt=0.016,
+            target_acquired=True,
+            dt=0.016,
         )
         state = ctrl.update(
-            target_pixel=(320, 240), laser_pixel=(310, 235),
+            target_pixel=(320, 240),
+            laser_pixel=(310, 235),
             open_loop_angles_rad=(0.0, 0.0),
-            target_acquired=True, dt=0.016,
+            target_acquired=True,
+            dt=0.016,
         )
         assert state.error_px == pytest.approx((10.0, 5.0))
 
@@ -295,16 +350,20 @@ class TestVisualServoPID:
         """_commanded_pan/_commanded_tilt should reset to zero when
         exiting VISUAL_SERVO so that ACQUISITION re-seeds from open-loop."""
         ctrl = _make_controller(
-            kp=0.5, ki=0.0, kd=0.0,
+            kp=0.5,
+            ki=0.0,
+            kd=0.0,
             entry_threshold_frames=1,
             exit_threshold_frames=2,
         )
         # Enter VISUAL_SERVO and accumulate non-zero commanded position
         for _ in range(3):
             ctrl.update(
-                target_pixel=(340, 250), laser_pixel=(320, 240),
+                target_pixel=(340, 250),
+                laser_pixel=(320, 240),
                 open_loop_angles_rad=(0.0, 0.0),
-                target_acquired=True, dt=0.016,
+                target_acquired=True,
+                dt=0.016,
             )
         assert ctrl.mode == ServoMode.VISUAL_SERVO
         assert ctrl._commanded_pan != 0.0 or ctrl._commanded_tilt != 0.0
@@ -312,9 +371,11 @@ class TestVisualServoPID:
         # Exit by losing laser
         for _ in range(2):
             ctrl.update(
-                target_pixel=(340, 250), laser_pixel=None,
+                target_pixel=(340, 250),
+                laser_pixel=None,
                 open_loop_angles_rad=(0.0, 0.0),
-                target_acquired=True, dt=0.016,
+                target_acquired=True,
+                dt=0.016,
             )
         assert ctrl.mode == ServoMode.ACQUISITION
         # Commanded position should be reset to zero
@@ -326,6 +387,7 @@ class TestVisualServoConfig:
 
     def test_config_defaults(self):
         from src.config import VisualServoConfig
+
         cfg = VisualServoConfig()
         assert cfg.enabled is False
         assert cfg.kp == 0.4
@@ -334,12 +396,14 @@ class TestVisualServoConfig:
 
     def test_config_in_pipeline(self):
         from src.config import PipelineConfig, VisualServoConfig
+
         cfg = PipelineConfig(mode="camera", target="human", source="0")
         assert isinstance(cfg.visual_servo, VisualServoConfig)
         assert cfg.visual_servo.enabled is False
 
     def test_yaml_parsing(self):
         from src.config_loader import build_config_from_yaml
+
         yaml_data = {
             "visual_servo": {
                 "enabled": True,

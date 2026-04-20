@@ -58,7 +58,9 @@ class SharedDisplayBuffer:
         self._last_read_counter: int = 0
 
     @classmethod
-    def create(cls, frame_shape: tuple[int, ...], *, frame_dtype: type[np.generic] = np.uint8) -> Self:
+    def create(
+        cls, frame_shape: tuple[int, ...], *, frame_dtype: type[np.generic] = np.uint8
+    ) -> Self:
         dtype = np.dtype(frame_dtype)
         data_bytes = int(np.prod(frame_shape, dtype=np.int64)) * dtype.itemsize
         data_shm = SharedMemory(create=True, size=data_bytes)
@@ -91,11 +93,11 @@ class SharedDisplayBuffer:
 
         current_gen = int(self._meta[0]["generation"])
         write_gen = current_gen + 1 if current_gen % 2 == 0 else current_gen + 2
-        self._meta[0]["generation"] = write_gen          # odd → write in progress
+        self._meta[0]["generation"] = write_gen  # odd → write in progress
         np.copyto(self._frame, frame, casting="no")
         counter = int(self._meta[0]["frame_counter"]) + 1
         self._meta[0]["frame_counter"] = counter
-        self._meta[0]["generation"] = write_gen + 1       # even → write complete
+        self._meta[0]["generation"] = write_gen + 1  # even → write complete
 
     def read(self) -> np.ndarray | None:
         """Read the latest display frame, or *None* if nothing new."""

@@ -34,7 +34,9 @@ def test_postprocess_under_1ms() -> None:
         lambda: parse_yolo_output(raw, conf_threshold=0.5, num_keypoints=num_keypoints)
     )
 
-    assert mean_ms < 10.0, f"postprocess mean {mean_ms:.3f}ms exceeds 10ms budget (target: <1ms on GPU machine)"
+    assert (
+        mean_ms < 10.0
+    ), f"postprocess mean {mean_ms:.3f}ms exceeds 10ms budget (target: <1ms on GPU machine)"
 
 
 @pytest.mark.perf
@@ -45,7 +47,9 @@ def test_kalman_update_under_10us() -> None:
     mean_ms = _perf_mean_ms(lambda: kalman.update((101.0, 200.0), dt=0.016))
     mean_us = mean_ms * 1000.0
 
-    assert mean_us < 500.0, f"Kalman update mean {mean_us:.2f}us exceeds 500us budget (target: <10us on GPU machine)"
+    assert (
+        mean_us < 500.0
+    ), f"Kalman update mean {mean_us:.2f}us exceeds 500us budget (target: <10us on GPU machine)"
 
 
 @pytest.mark.perf
@@ -65,4 +69,6 @@ def test_bytetrack_single_target_under_500us() -> None:
     mean_ms = _perf_mean_ms(_step)
     mean_us = mean_ms * 1000.0
 
-    assert mean_us < 5000.0, f"ByteTracker single-target mean {mean_us:.1f}us exceeds 5ms budget (target: <500us on GPU machine)"
+    assert (
+        mean_us < 5000.0
+    ), f"ByteTracker single-target mean {mean_us:.1f}us exceeds 5ms budget (target: <500us on GPU machine)"

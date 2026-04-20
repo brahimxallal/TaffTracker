@@ -116,7 +116,6 @@ def test_kalman_soft_reset_on_consecutive_gated() -> None:
     # Initialize at (100, 100) moving slowly
     kalman.update((100.0, 100.0), dt=0.016)
     kalman.update((101.0, 101.0), dt=0.016)
-    state_before = kalman.current_state()
 
     # Inject wild measurements that should be gated
     for _ in range(3):
@@ -145,7 +144,9 @@ def test_kalman_adaptive_r_inverted_speed_relationship() -> None:
     # At high speed: R should be close to adaptive_r_min
     kalman._adapt_noise(200.0)
     r_at_speed = kalman._measurement_noise
-    assert r_at_speed == pytest.approx(8.0), f"At full speed, R should be min (8.0), got {r_at_speed}"
+    assert r_at_speed == pytest.approx(
+        8.0
+    ), f"At full speed, R should be min (8.0), got {r_at_speed}"
 
 
 @pytest.mark.unit

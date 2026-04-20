@@ -6,7 +6,6 @@ from typing import Literal
 
 import yaml
 
-
 TargetKind = Literal["human", "dog"]
 
 

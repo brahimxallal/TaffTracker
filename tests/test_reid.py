@@ -1,4 +1,5 @@
 """Phase I: Soft re-identification tests."""
+
 from __future__ import annotations
 
 import numpy as np

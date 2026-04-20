@@ -11,7 +11,6 @@ from src.calibration.depth_estimator import DepthSmoother
 from src.config import TrackingConfig
 from src.inference.postprocess import (
     compute_stabilized_centroid,
-    KeypointStabilizer,
 )
 from src.inference.stages.centroid import CentroidStage
 from src.inference.stages.servo import ServoStage
@@ -19,7 +18,6 @@ from src.inference.stages.tracker import TrackerStage
 from src.shared.pose_schema import PoseSchema
 from src.shared.types import Detection, TrackingMessage
 from src.tracking.adaptive import AdaptiveController
-from src.tracking.kalman import KalmanFilter
 from src.tracking.optical_flow import OpticalFlowRefiner
 
 LOGGER = logging.getLogger("inference.pipeline")
@@ -89,7 +87,6 @@ class TrackingPipeline:
         Returns (message, next_was_lost, current_locked_id, prev_locked_bbox).
         """
         ts = self.tracker_stage
-        cs = self.centroid_stage
 
         primary_track, reid_match = ts.select_primary_track(
             tracks, record.frame, record.timestamp_ns, prev_locked_id
@@ -120,7 +117,8 @@ class TrackingPipeline:
             if proximity_transfer:
                 LOGGER.info(
                     "Lock transition: %s -> %s (proximity, no reset)",
-                    prev_locked_id, current_locked,
+                    prev_locked_id,
+                    current_locked,
                 )
             else:
                 if prev_locked_id is not None and ts.kalman.initialized:
@@ -145,11 +143,7 @@ class TrackingPipeline:
                             record.timestamp_ns,
                         )
 
-                if (
-                    not reid_match
-                    and primary_track is not None
-                    and prev_locked_id is not None
-                ):
+                if not reid_match and primary_track is not None and prev_locked_id is not None:
                     matched_id = ts.reid_buffer.match(
                         record.frame,
                         primary_track.bbox,
@@ -157,9 +151,7 @@ class TrackingPipeline:
                     )
                     if matched_id == prev_locked_id:
                         reid_match = True
-                        LOGGER.debug(
-                            "Re-ID match: track %d → %d", current_locked, prev_locked_id
-                        )
+                        LOGGER.debug("Re-ID match: track %d → %d", current_locked, prev_locked_id)
 
                 if not reid_match:
                     restored = (
@@ -172,11 +164,7 @@ class TrackingPipeline:
                         if current_locked is not None
                         else False
                     )
-                    if (
-                        not restored
-                        and prev_locked_id is not None
-                        and current_locked is not None
-                    ):
+                    if not restored and prev_locked_id is not None and current_locked is not None:
                         restored = ts.restore_track_state(
                             prev_locked_id,
                             self._ema_pixel,
@@ -194,12 +182,14 @@ class TrackingPipeline:
                         prev_locked_id,
                         current_locked,
                         "hit" if reid_match else "miss",
-                        "hit" if (not reid_match and restored) else ("skip" if reid_match else "miss"),
+                        (
+                            "hit"
+                            if (not reid_match and restored)
+                            else ("skip" if reid_match else "miss")
+                        ),
                     )
 
-        prev_locked_bbox = (
-            tuple(primary_track.bbox) if primary_track is not None else None
-        )
+        prev_locked_bbox = tuple(primary_track.bbox) if primary_track is not None else None
 
         # Build message
         message, next_was_lost = self._build_message(
@@ -234,7 +224,7 @@ class TrackingPipeline:
         if message.servo_angular_velocity is not None:
             pan_dps = degrees(message.servo_angular_velocity[0])
             tilt_dps = degrees(message.servo_angular_velocity[1])
-            cam_speed = (pan_dps ** 2 + tilt_dps ** 2) ** 0.5
+            cam_speed = (pan_dps**2 + tilt_dps**2) ** 0.5
             self.adaptive.notify_camera_motion(cam_speed)
 
         return message, next_was_lost, current_locked, prev_locked_bbox
@@ -253,7 +243,6 @@ class TrackingPipeline:
         inference_ms: float,
         postprocess_ms: float,
     ) -> tuple[TrackingMessage, bool]:
-        from math import radians
 
         ts = self.tracker_stage
         cs = self.centroid_stage
@@ -271,7 +260,9 @@ class TrackingPipeline:
                 keypoints=primary_track.keypoints,
             )
             raw_pixel = compute_stabilized_centroid(
-                detection, self._pose_schema, stabilizer,
+                detection,
+                self._pose_schema,
+                stabilizer,
                 pp_config=self._tracking_config.postprocess,
             )
 
@@ -280,7 +271,9 @@ class TrackingPipeline:
                 kalman.oru_re_update()
 
             compensation = cs.compensate_measurement_for_egomotion(
-                raw_pixel, dt, record.timestamp_ns,
+                raw_pixel,
+                dt,
+                record.timestamp_ns,
             )
             measurement_pixel = raw_pixel
             if compensation is not None:
@@ -299,7 +292,9 @@ class TrackingPipeline:
             ts.last_locked_timestamp_ns = record.timestamp_ns
 
             depth_m = cs.update_depth(
-                primary_track.keypoints, self._depth_smoother, bbox=primary_track.bbox,
+                primary_track.keypoints,
+                self._depth_smoother,
+                bbox=primary_track.bbox,
             )
 
             current_time_s = record.timestamp_ns / 1e9
@@ -315,7 +310,9 @@ class TrackingPipeline:
             raw_angles = cs.camera_model.pixel_to_angle(*raw_pixel)
             filtered_angles = cs.compute_angles(filtered_pixel, depth_m)
             angular_velocity = cs.compute_angular_velocity(
-                filtered_pixel, self._ema_pixel.dx, self._ema_pixel.dy,
+                filtered_pixel,
+                self._ema_pixel.dx,
+                self._ema_pixel.dy,
             )
 
             state_source = "measurement"
@@ -341,7 +338,9 @@ class TrackingPipeline:
             if predicted is not None:
                 filtered_velocity = (predicted.vx, predicted.vy)
                 angular_velocity = cs.compute_angular_velocity(
-                    filtered_pixel, predicted.vx, predicted.vy,
+                    filtered_pixel,
+                    predicted.vx,
+                    predicted.vy,
                 )
                 servo_angular_velocity = angular_velocity
             else:
@@ -351,7 +350,11 @@ class TrackingPipeline:
 
         # Laser + visual servo
         laser_pixel, servo_angles, servo_mode = self.servo_stage.process(
-            frame, filtered_pixel, servo_angles, target_acquired, dt,
+            frame,
+            filtered_pixel,
+            servo_angles,
+            target_acquired,
+            dt,
         )
 
         # Non-primary targets

@@ -1,37 +1,35 @@
 from __future__ import annotations
 
-from dataclasses import replace
 import json
-from math import copysign
-from math import degrees
-from pathlib import Path
-from multiprocessing.sharedctypes import Synchronized
-from queue import Empty
 import logging
 import multiprocessing as mp
 import struct
 import threading
 import time
+from dataclasses import replace
+from math import copysign, degrees
+from multiprocessing.sharedctypes import Synchronized
+from pathlib import Path
+from queue import Empty
 from traceback import format_exc
 
 from src.config import CameraConfig, CommConfig, GimbalConfig, Mode, RuntimeFlags, TrackingConfig
 from src.output.auto_comm import AutoCommTransport
 from src.output.serial_comm import SerialComm
 from src.output.udp_comm import UDPComm
-from src.output.visualizer import draw_overlay, FrameSmoother
+from src.output.visualizer import FrameSmoother, draw_overlay
+from src.shared.display_buffer import DisplayBufferLayout, SharedDisplayBuffer
 from src.shared.profiler import StageProfiler
 from src.shared.protocol import (
-    build_state_flags,
-    checksum_bytes,
-    encode_packet_v2,
     FLAG_LASER_ON,
     FLAG_RELAY_ON,
     QUALITY_FLAG_MANUAL,
+    build_state_flags,
+    checksum_bytes,
+    encode_packet_v2,
 )
 from src.shared.ring_buffer import RingBufferLayout, SharedRingBuffer
 from src.shared.types import ProcessErrorReport, TrackingMessage
-from src.shared.display_buffer import DisplayBufferLayout, SharedDisplayBuffer
-
 
 LOGGER = logging.getLogger("output")
 
@@ -70,7 +68,6 @@ def _draw_diagnostics(
     x = 12
     y_base = h - 60
     gap = 14
-    white = (200, 200, 200)
     green = (50, 255, 50)
     yellow = (0, 255, 255)
     red = (50, 50, 255)
@@ -83,10 +80,39 @@ def _draw_diagnostics(
     color_lat = green if avg_lat < 20 else yellow if avg_lat < 40 else red
     color_drop = green if drop_pct < 2 else yellow if drop_pct < 10 else red
 
-    cv2.putText(frame, f"LOCK {lock_pct:.0f}%", (x, y_base), font, scale, color_lock, thick, cv2.LINE_AA)
-    cv2.putText(frame, f"LAT {avg_lat:.1f}/{latency_max:.0f}ms", (x, y_base + gap), font, scale, color_lat, thick, cv2.LINE_AA)
-    cv2.putText(frame, f"DROP {display_drops}/{max(1, display_total)} ({drop_pct:.1f}%)", (x, y_base + gap * 2), font, scale, color_drop, thick, cv2.LINE_AA)
-    cv2.putText(frame, transport_label, (x, y_base + gap * 3), font, scale, transport_color, thick, cv2.LINE_AA)
+    cv2.putText(
+        frame, f"LOCK {lock_pct:.0f}%", (x, y_base), font, scale, color_lock, thick, cv2.LINE_AA
+    )
+    cv2.putText(
+        frame,
+        f"LAT {avg_lat:.1f}/{latency_max:.0f}ms",
+        (x, y_base + gap),
+        font,
+        scale,
+        color_lat,
+        thick,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        frame,
+        f"DROP {display_drops}/{max(1, display_total)} ({drop_pct:.1f}%)",
+        (x, y_base + gap * 2),
+        font,
+        scale,
+        color_drop,
+        thick,
+        cv2.LINE_AA,
+    )
+    cv2.putText(
+        frame,
+        transport_label,
+        (x, y_base + gap * 3),
+        font,
+        scale,
+        transport_color,
+        thick,
+        cv2.LINE_AA,
+    )
 
 
 def _get_transport_status(sender) -> tuple[str, tuple[int, int, int]]:
@@ -218,7 +244,9 @@ class OutputProcess(mp.Process):
                 continue
 
             manual_pan_deg = float(self._manual_pan.value) if self._manual_pan is not None else 0.0
-            manual_tilt_deg = float(self._manual_tilt.value) if self._manual_tilt is not None else 0.0
+            manual_tilt_deg = (
+                float(self._manual_tilt.value) if self._manual_tilt is not None else 0.0
+            )
             manual_pan_deg = max(-pan_lim, min(pan_lim, manual_pan_deg))
             manual_tilt_deg = max(-tilt_lim, min(tilt_lim, manual_tilt_deg))
 
@@ -308,7 +336,9 @@ class OutputProcess(mp.Process):
         display_buffer: SharedDisplayBuffer | None = None
         if self._display_buffer_layout is not None:
             display_buffer = SharedDisplayBuffer.attach(self._display_buffer_layout)
-        use_display = not self._flags.headless and (display_buffer is not None or self._display_queue is not None)
+        use_display = not self._flags.headless and (
+            display_buffer is not None or self._display_queue is not None
+        )
         profiler = StageProfiler(window_size=256, enabled=self._flags.profile)
         _frame_smoother = FrameSmoother()
         run_start = time.perf_counter()
@@ -379,7 +409,9 @@ class OutputProcess(mp.Process):
                         if record is None:
                             record = ring_buffer.read_latest(copy=True)
                         if record is not None:
-                            is_manual = self._manual_mode is not None and bool(self._manual_mode.value)
+                            is_manual = self._manual_mode is not None and bool(
+                                self._manual_mode.value
+                            )
                             frame = draw_overlay(
                                 record.frame,
                                 outbound,
@@ -423,7 +455,8 @@ class OutputProcess(mp.Process):
                             if now - _display_drop_window_start >= 1.0:
                                 if _display_drop_window_count > 0:
                                     drop_pct = (
-                                        _display_drop_window_count / max(1, _display_drop_window_total)
+                                        _display_drop_window_count
+                                        / max(1, _display_drop_window_total)
                                     ) * 100.0
                                     LOGGER.warning(
                                         "Display backpressure: dropped %d/%d frames in the last %.1fs (%.1f%%)",
@@ -444,7 +477,10 @@ class OutputProcess(mp.Process):
                     drop_pct = (_display_drops / max(1, _display_total)) * 100.0
                     LOGGER.info(
                         "Output FPS: %.1f | display drops: %d/%d (%.1f%%)",
-                        fps, _display_drops, _display_total, drop_pct,
+                        fps,
+                        _display_drops,
+                        _display_total,
+                        drop_pct,
                     )
                     self._frames_processed = 0
                     self._last_log_time = current_time
@@ -482,7 +518,9 @@ class OutputProcess(mp.Process):
             "duration_s": duration_s,
             "display_drops": display_drops,
             "display_total": display_total,
-            "display_drop_rate": (display_drops / max(1, display_total)) if display_total > 0 else 0.0,
+            "display_drop_rate": (
+                (display_drops / max(1, display_total)) if display_total > 0 else 0.0
+            ),
             "packets_sent": packets_sent,
             "packets_failed": packets_failed,
             "packet_send_rate_hz": packets_sent / duration_s,
@@ -551,7 +589,9 @@ class OutputProcess(mp.Process):
             try:
                 return AutoCommTransport(self._comm_config)
             except Exception as exc:
-                LOGGER.warning("Could not initialize auto comm transport (%s). Visualization only.", exc)
+                LOGGER.warning(
+                    "Could not initialize auto comm transport (%s). Visualization only.", exc
+                )
                 return None
         try:
             if channel == "serial":
@@ -562,7 +602,11 @@ class OutputProcess(mp.Process):
                 self._comm_config.udp_host,
                 self._comm_config.udp_port,
             )
-            return UDPComm(self._comm_config.udp_host, self._comm_config.udp_port, redundancy=self._comm_config.udp_redundancy)
+            return UDPComm(
+                self._comm_config.udp_host,
+                self._comm_config.udp_port,
+                redundancy=self._comm_config.udp_redundancy,
+            )
         except Exception as exc:
             LOGGER.warning(
                 "Could not open %s comm (%s). Running visualization only.",
@@ -671,7 +715,10 @@ class OutputProcess(mp.Process):
 
             # Compute dt from message timestamps
             dt = 1.0 / max(message.fps, 1.0) if message.fps > 0 else 1.0 / 60.0
-            if self._last_encode_ts_ns is not None and message.timestamp_ns > self._last_encode_ts_ns:
+            if (
+                self._last_encode_ts_ns is not None
+                and message.timestamp_ns > self._last_encode_ts_ns
+            ):
                 dt = (message.timestamp_ns - self._last_encode_ts_ns) / 1e9
                 dt = min(dt, 0.1)
             self._last_encode_ts_ns = message.timestamp_ns
@@ -682,8 +729,16 @@ class OutputProcess(mp.Process):
 
                 # Step 6 — Gain schedule: aggressive far, gentle near
                 thr = self._gimbal_config.gain_schedule_threshold_deg
-                kp_pan = self._gimbal_config.effective_kp_far if pan_abs > thr else self._gimbal_config.effective_kp_near
-                kp_tilt = self._gimbal_config.effective_kp_far if tilt_abs > thr else self._gimbal_config.effective_kp_near
+                kp_pan = (
+                    self._gimbal_config.effective_kp_far
+                    if pan_abs > thr
+                    else self._gimbal_config.effective_kp_near
+                )
+                kp_tilt = (
+                    self._gimbal_config.effective_kp_far
+                    if tilt_abs > thr
+                    else self._gimbal_config.effective_kp_near
+                )
 
                 # Step 5 — Velocity feedforward
                 ff_gain = self._gimbal_config.velocity_feedforward_gain
@@ -693,7 +748,9 @@ class OutputProcess(mp.Process):
 
                 # Approach rate (°/s) + feedforward, zero inside deadband
                 rate_pan = (kp_pan * pan_err_deg + ff_pan) if pan_abs >= deadband else 0.0
-                rate_tilt = (kp_tilt * tilt_scale * tilt_err_deg + ff_tilt) if tilt_abs >= deadband else 0.0
+                rate_tilt = (
+                    (kp_tilt * tilt_scale * tilt_err_deg + ff_tilt) if tilt_abs >= deadband else 0.0
+                )
 
                 # Derivative damping from LP-filtered error finite-difference.
                 if dt > 0:
@@ -765,7 +822,9 @@ class OutputProcess(mp.Process):
 
         pan_centideg = int(round(pan_deg * 100.0))
         tilt_centideg = int(round(tilt_deg * 100.0))
-        confidence = int(max(0.0, min(1.0, confidence_value if is_manual else message.confidence)) * 255.0)
+        confidence = int(
+            max(0.0, min(1.0, confidence_value if is_manual else message.confidence)) * 255.0
+        )
 
         if not is_manual:
             # Angular velocity → centideg/sec (with sign inversion) — use servo velocity (no EMA)
