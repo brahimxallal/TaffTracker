@@ -7,8 +7,8 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from src.capture.preflight import FrameHealthMonitor
 from src.config import PreflightConfig
+from src.shared.preflight import FrameHealthMonitor
 
 
 def _constant_frame(brightness: int = 128, shape: tuple[int, ...] = (64, 64, 3)) -> np.ndarray:
@@ -107,7 +107,7 @@ def test_cooldown_prevents_spam() -> None:
         # Each call returns the same base_time so cooldown blocks subsequent warnings
         return base_time
 
-    with patch("src.capture.preflight.time.monotonic", side_effect=fake_monotonic):
+    with patch("src.shared.preflight.time.monotonic", side_effect=fake_monotonic):
         for i in range(20):
             brightness = 50 + (i % 5) * 40  # oscillating brightness
             frame = _constant_frame(brightness)

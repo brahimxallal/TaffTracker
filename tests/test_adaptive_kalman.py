@@ -1,4 +1,9 @@
-"""Phase 5: Adaptive Kalman L2 tests — adaptive R/Q, innovation gate, ORU, prediction cap."""
+"""Tests for KalmanFilter adaptive features: R/Q scaling, innovation gate, ORU, prediction cap.
+
+These extend ``test_kalman.py`` (basic state + snapshot/restore) with coverage
+of the adaptation machinery. Lives in a separate file because the feature
+set is large and the fixtures are non-trivial.
+"""
 
 from __future__ import annotations
 

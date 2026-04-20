@@ -257,7 +257,7 @@ class InferenceProcess(mp.Process):
         prev_locked_id: int | None = None
         prev_locked_bbox: tuple[float, ...] | None = None
 
-        from src.capture.preflight import FrameHealthMonitor
+        from src.shared.preflight import FrameHealthMonitor
 
         health_monitor = FrameHealthMonitor(self._preflight_config)
         if self._preflight_config.enabled:

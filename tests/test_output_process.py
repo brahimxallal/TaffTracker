@@ -9,7 +9,8 @@ import pytest
 
 from src.config import CameraConfig, CommConfig, GimbalConfig, RuntimeFlags, TrackingConfig
 from src.output.auto_comm import AutoCommTransport
-from src.output.process import OutputProcess, _get_transport_status
+from src.output.diagnostics import get_transport_status as _get_transport_status
+from src.output.process import OutputProcess
 from src.output.serial_comm import SerialComm
 from src.shared.protocol import (
     FLAG_FAST_MOTION,
