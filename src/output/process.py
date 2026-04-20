@@ -13,7 +13,15 @@ from pathlib import Path
 from queue import Empty
 from traceback import format_exc
 
-from src.config import CameraConfig, CommConfig, GimbalConfig, Mode, RuntimeFlags, TrackingConfig
+from src.config import (
+    CameraConfig,
+    CommConfig,
+    GimbalConfig,
+    Mode,
+    RuntimeFlags,
+    ServoControlConfig,
+    TrackingConfig,
+)
 from src.output.auto_comm import AutoCommTransport
 from src.output.serial_comm import SerialComm
 from src.output.udp_comm import UDPComm
@@ -32,20 +40,6 @@ from src.shared.ring_buffer import RingBufferLayout, SharedRingBuffer
 from src.shared.types import ProcessErrorReport, TrackingMessage
 
 LOGGER = logging.getLogger("output")
-
-MANUAL_RESPONSE_VELOCITY_FLOOR_DPS = 80.0
-
-# ── Critically-damped incremental controller ─────────────────────────────
-# Accumulates a commanded angle at a rate proportional to the tracking
-# error.  Combined with the servo-path 1-Euro filter and firmware EMA,
-# the closed loop targets ζ ≥ 1.0 (critically-damped to overdamped).
-#
-# IMPORTANT: Derivative damping uses low-pass-filtered finite-difference
-# of the error angle, NOT Kalman angular velocity.  On a camera-on-gimbal
-# mount, Kalman velocity is polluted by ego-motion: when the gimbal
-# oscillates, the camera co-moves, and the Kalman filter interprets the
-# resulting pixel motion as target velocity → positive feedback.
-_D_FILTER_ALPHA = 0.35  # LP filter on error derivative (0=heavy smooth, 1=raw)
 
 
 def _draw_diagnostics(
@@ -154,6 +148,7 @@ class OutputProcess(mp.Process):
         tracking_config: TrackingConfig,
         flags: RuntimeFlags | None = None,
         gimbal_config: GimbalConfig | None = None,
+        servo_control_config: ServoControlConfig | None = None,
         display_queue: mp.Queue | None = None,
         display_buffer_layout: DisplayBufferLayout | None = None,
         relay_flag: Synchronized | None = None,
@@ -185,6 +180,7 @@ class OutputProcess(mp.Process):
         self._tracking_config = tracking_config
         self._flags = flags or RuntimeFlags()
         self._gimbal_config = gimbal_config or GimbalConfig()
+        self._servo_control_config = servo_control_config or ServoControlConfig()
         self._frames_processed = 0
         self._last_log_time = time.perf_counter()
         self._center_pixel = (camera_config.width / 2.0, camera_config.height / 2.0)
@@ -216,7 +212,8 @@ class OutputProcess(mp.Process):
     def _boost_manual_velocity(self, velocity_dps: float) -> float:
         if abs(velocity_dps) <= 1e-6:
             return 0.0
-        return copysign(max(abs(velocity_dps), MANUAL_RESPONSE_VELOCITY_FLOOR_DPS), velocity_dps)
+        floor = self._servo_control_config.manual_response_velocity_floor_dps
+        return copysign(max(abs(velocity_dps), floor), velocity_dps)
 
     def _manual_tick_loop(
         self,
@@ -756,7 +753,7 @@ class OutputProcess(mp.Process):
                 if dt > 0:
                     raw_d_pan = (pan_err_deg - self._prev_err_pan) / dt
                     raw_d_tilt = (tilt_err_deg - self._prev_err_tilt) / dt
-                    a = _D_FILTER_ALPHA
+                    a = self._servo_control_config.derivative_filter_alpha
                     d_err_pan = a * raw_d_pan + (1.0 - a) * self._prev_d_pan
                     d_err_tilt = a * raw_d_tilt + (1.0 - a) * self._prev_d_tilt
                     self._prev_d_pan = d_err_pan

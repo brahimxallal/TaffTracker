@@ -268,8 +268,8 @@ class InferenceProcess(mp.Process):
         frame_drop_count = 0
         frame_total_count = 0
         frames_since_gc = 0
-        _DROP_WINDOW = 120
-        _DROP_RATE_THRESHOLD = 0.10
+        _DROP_WINDOW = of.drop_rate_window
+        _DROP_RATE_THRESHOLD = of.drop_rate_disable_threshold
         flow_auto_disabled = False
         _FRAME_TIMEOUT_NS = int(3.0 / max(self._camera_config.fps, 1) * 1_000_000_000)
         _last_frame_received_ns = perf_counter_ns()

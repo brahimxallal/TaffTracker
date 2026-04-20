@@ -25,6 +25,7 @@ from src.config import (
     RelayConfig,
     RuntimeFlags,
     RuntimePaths,
+    ServoControlConfig,
     VisualServoConfig,
     adapt_tracking_for_fps,
     default_tracking_config,
@@ -339,6 +340,9 @@ def build_config_from_yaml(
         pulse_ms=int(relay_cfg.get("pulse_ms", 500)),
     )
 
+    servo_ctrl_cfg = yaml_data.get("servo_control", {})
+    servo_control = _overlay_dataclass(ServoControlConfig(), servo_ctrl_cfg)
+
     vs_cfg = yaml_data.get("visual_servo", {})
     visual_servo = _overlay_dataclass(VisualServoConfig(), vs_cfg)
 
@@ -364,6 +368,7 @@ def build_config_from_yaml(
         visual_servo=visual_servo,
         preflight=preflight,
         relay=relay,
+        servo_control=servo_control,
     )
     _validate_config(config)
     return config

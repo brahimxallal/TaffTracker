@@ -456,6 +456,7 @@ def main() -> None:
             config.tracking,
             config.flags,
             config.gimbal,
+            servo_control_config=config.servo_control,
             display_buffer_layout=display_buffer.layout if display_buffer is not None else None,
             relay_flag=relay_flag,
             laser_enabled=laser_enabled,

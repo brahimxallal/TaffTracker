@@ -129,6 +129,11 @@ class OpticalFlowConfig:
     flow_weight: float = 0.7
     min_confidence: float = 0.3
     fb_threshold_px: float = 2.0
+    # Auto-disable flow when the frame-drop rate stays above
+    # ``drop_rate_disable_threshold`` over a ``drop_rate_window`` span.
+    # Re-enable once drop rate falls below half the disable threshold.
+    drop_rate_window: int = 120
+    drop_rate_disable_threshold: float = 0.10
 
 
 @dataclass(frozen=True)
@@ -295,6 +300,21 @@ class RelayConfig:
 
 
 @dataclass(frozen=True)
+class ServoControlConfig:
+    """Output-stage servo controller tuning constants."""
+
+    # Minimum |response velocity| emitted when the user is driving the
+    # gimbal manually — keeps the firmware from quantizing a small stick
+    # deflection to zero.
+    manual_response_velocity_floor_dps: float = 80.0
+    # Low-pass filter on the error-derivative term (0 = heavy smoothing,
+    # 1 = raw finite difference). Derivative is taken on the angular
+    # error, NOT Kalman velocity, because Kalman velocity is polluted by
+    # ego-motion on camera-on-gimbal mounts.
+    derivative_filter_alpha: float = 0.35
+
+
+@dataclass(frozen=True)
 class RuntimeFlags:
     debug: bool = False
     headless: bool = False
@@ -321,6 +341,7 @@ class PipelineConfig:
     visual_servo: VisualServoConfig = field(default_factory=VisualServoConfig)
     preflight: PreflightConfig = field(default_factory=PreflightConfig)
     relay: RelayConfig = field(default_factory=RelayConfig)
+    servo_control: ServoControlConfig = field(default_factory=ServoControlConfig)
 
 
 def default_tracking_config(target: TargetKind) -> TrackingConfig:

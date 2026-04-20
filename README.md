@@ -22,13 +22,15 @@ PC-side latency, sub-50 ms system latency including servo travel.
 ## Quick start
 
 ```bash
-git clone https://github.com/<user>/vision-gimbal-tracker.git
-cd vision-gimbal-tracker
+git clone https://github.com/brahimxallal/TaffTracker.git
+cd TaffTracker
 python -m venv .venv && .venv\Scripts\activate   # Windows
 pip install -r requirements-dev.txt
 python scripts/export_engines.py --target human   # one-time TRT export
 python -m src.main --mode camera --target human --source 0
 ```
+
+Full setup (TRT export, firmware flash, calibration): [docs/INSTALL.md](docs/INSTALL.md).
 
 ## Project layout
 
