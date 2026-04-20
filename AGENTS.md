@@ -42,7 +42,9 @@ This repository is a low-latency vision-guided gimbal tracker with a Python mult
 
 ## Key Files
 
-- `src/main.py`: process orchestration, startup validation, and shutdown flow (UI helpers live in `src/ui/`)
+- `src/main.py`: process orchestration and the main display/hotkey loop only
+- `src/cli.py`: argparse, YAML + CLI config assembly, and `validate_environment`
+- `src/process_supervisor.py`: error-queue drain, dead-process detection, graceful stop, cleanup
 - `src/ui/overlays.py`: pure OpenCV renderers for the help panel and laser-cal HUD
 - `src/ui/hotkeys.py`: keyboard-event dispatch rules for the main display loop
 - `src/capture/process.py`: frame capture and ring-buffer writes
