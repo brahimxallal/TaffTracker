@@ -1,0 +1,61 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vision_gimbal_tracker"
+version = "1.0.0"
+description = "Ultra-low-latency vision-guided gimbal tracking pipeline"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "numpy>=2.0,<3.0",
+    "opencv-python>=4.13,<5.0",
+    "PyYAML>=6.0,<7.0",
+    "scipy>=1.16,<2.0",
+    "ultralytics>=8.4,<9.0",
+    "cuda-python>=12.0",
+    "pyserial>=3.5,<4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0,<10.0",
+    "pytest-cov>=7.0,<8.0",
+    "coverage>=7.0,<8.0",
+    "black>=26.0",
+    "ruff>=0.15",
+    "mypy>=1.20",
+]
+
+[project.scripts]
+tracker = "src.main:main"
+
+[tool.black]
+line-length = 100
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP"]
+ignore = ["E501"]  # line length handled by black
+
+[tool.ruff.lint.per-file-ignores]
+"scripts/calibrate.py" = ["E701", "E702"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "--cov=src --cov-report=term-missing"
+markers = [
+    "unit: unit tests",
+    "integration: integration tests",
+    "perf: performance regression tests",
+]
+
+[tool.mypy]
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true

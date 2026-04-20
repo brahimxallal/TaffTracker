@@ -1,0 +1,13 @@
+# ============================================================
+#  Vision Gimbal Tracker — Dev Dependencies
+# ============================================================
+# Install: pip install -r requirements-dev.txt
+
+-r requirements.txt
+
+pytest>=9.0,<10.0
+pytest-cov>=7.0,<8.0
+coverage>=7.0,<8.0
+black>=26.0
+ruff>=0.15
+mypy>=1.20

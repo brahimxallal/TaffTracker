@@ -1,0 +1,24 @@
+# ============================================================
+#  Vision Gimbal Tracker — Runtime Dependencies
+# ============================================================
+# Install: pip install -r requirements.txt
+#
+# NOTE: torch, tensorrt, and CUDA libs must be installed separately
+# because they require platform-specific wheels:
+#   pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
+#   pip install tensorrt nvidia-cuda-nvrtc-cu12
+
+# --- Core ---
+numpy>=2.0,<3.0
+opencv-python>=4.13,<5.0
+PyYAML>=6.0,<7.0
+scipy>=1.16,<2.0
+
+# --- YOLO inference ---
+ultralytics>=8.4,<9.0
+
+# --- CUDA Python bindings ---
+cuda-python>=12.0
+
+# --- Gimbal communication ---
+pyserial>=3.5,<4.0

@@ -1,0 +1,37 @@
+{
+	"version": 4,
+	"configurations": [
+		{
+			"name": "ESP32-S3 Firmware",
+			"compilerPath": "C:\\PIO\\packages\\toolchain-xtensa-esp-elf\\bin\\xtensa-esp32s3-elf-gcc.exe",
+			"intelliSenseMode": "windows-gcc-x64",
+			"cStandard": "c17",
+			"cppStandard": "c++17",
+			"compileCommands": "${workspaceFolder}\\firmware\\esp32s3_gimbal\\compile_commands.json",
+			"forcedInclude": [
+				"${workspaceFolder}\\firmware\\esp32s3_gimbal\\.pio\\build\\esp32s3\\config\\sdkconfig.h"
+			],
+			"includePath": [
+				"${workspaceFolder}/firmware/esp32s3_gimbal/include",
+				"${workspaceFolder}/firmware/esp32s3_gimbal/src",
+				"${workspaceFolder}/firmware/esp32s3_gimbal/.pio/build/esp32s3/config",
+				"C:/PIO/packages/framework-espidf/components/**"
+			],
+			"defines": [
+				"ESP_PLATFORM",
+				"IDF_VER=\"5.5.3\"",
+				"CONFIG_LOG_MAXIMUM_LEVEL=3",
+				"CONFIG_FREERTOS_HZ=1000"
+			],
+			"browse": {
+				"path": [
+					"${workspaceFolder}/firmware/esp32s3_gimbal/include",
+					"${workspaceFolder}/firmware/esp32s3_gimbal/src",
+					"${workspaceFolder}/firmware/esp32s3_gimbal/.pio/build/esp32s3/config",
+					"C:/PIO/packages/framework-espidf/components"
+				],
+				"limitSymbolsToIncludedHeaders": true
+			}
+		}
+	]
+}

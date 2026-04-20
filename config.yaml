@@ -1,0 +1,220 @@
+# ============================================================
+#  Vision Gimbal Tracker — Runtime Configuration
+# ============================================================
+# Edit this file to configure the tracker without code changes.
+# CLI arguments override values set here.
+
+# --- Pipeline ---
+mode: camera          # camera | video
+target: human         # human | dog
+source: "0"           # Camera index (DroidCam virtual cam; capture_width/height force 1080p)
+
+# --- Camera ---
+camera:
+  width: 640
+  height: 640
+  fps: 60
+  backend: auto       # auto picks MSMF for DroidCam, dshow for USB webcam
+  fov: 66.2         # Horizontal FOV in degrees (measured)
+  buffer_size: 1       # OpenCV capture buffer (1 = lowest latency)
+  orientation: landscape_native  # portrait | landscape_native
+  capture_width: 1920  # Native resolution to request from camera
+  capture_height: 1080 # (DroidCam streams 1080p; letterbox rescales to 640x640)
+
+# --- Communication (gimbal output) ---
+comms:
+  channel: auto          # auto | serial | udp  (auto: try serial first, fallback UDP)
+  serial_port: COM4
+  baud_rate: 921600
+  udp_host: 192.168.1.13   # ESP32 IP on ZORGATI_2.4GHz (MAC 98:88:e0 = Espressif)
+  udp_port: 6000
+  udp_redundancy: 1         # Send each packet N times (1 = no redundancy, 2 = duplicate)
+  enabled: true
+
+# --- Gimbal (servo direction) ---
+gimbal:
+  invert_pan: false     # Flip pan direction
+  invert_tilt: true     # Flip tilt direction (inverted tilt servo mount)
+  pan_limit_deg: 110.0  # Max ±degrees for pan servo (MG996R extended: 210° total = ±105°)
+  tilt_limit_deg: 73.0  # Calibrated: mechanical range -20°..+80°, center at +24° → ±44°
+  kp: 3.5               # Approach gain (°/s per ° error)
+  ki: 0.0               # Reserved (unused in incremental controller)
+  kd: 0.5               # Step 2a: raised from 0.35 to damp tilt oscillation
+  deadband_deg: 0.8     # Step 2a: widened from 0.6 to hide residual tilt ripple
+  integral_decay_rate: 0.2  # Gentle integral bleed inside deadband (/s)
+  slew_limit_dps: 120.0 # Max °/s command change
+  tilt_scale: 0.45      # Step 2a: cut from 0.65 — tilt ego-motion feedback is stronger than pan
+  velocity_feedforward_gain: 0.5  # Velocity FF on Kalman target vel (0 = disabled)
+  kp_far: 5.0            # kp when |error| > gain_schedule_threshold_deg
+  kp_near: 1.5           # kp when |error| <= gain_schedule_threshold_deg
+  gain_schedule_threshold_deg: 3.0
+  predictive_lead_s: 0.08  # Velocity lead time (s); 0 = disabled
+
+# --- Mount Offset (camera lens to gimbal pivot) ---
+# Keep zero when the lens is effectively on-axis with the pivot.
+# Use small non-zero values only if close-range parallax is measurable.
+mount_offset:
+  x_m: 0.0
+  y_m: 0.0
+  z_m: 0.0
+  depth_ema_alpha: 0.3
+  depth_stale_frames: 60
+
+# --- Models ---
+models:
+  person_model: models/yolo26n-person-17pose.pt
+  dog_model: models/Enhanceddog/best.pt
+  engine_dir: engines
+  precision: fp16       # fp16 | int8
+  image_size: 640
+
+# --- Runtime Flags ---
+runtime:
+  debug: false
+  headless: false
+  profile: true
+  log_file: null
+  log_level: INFO     # DEBUG | INFO | WARNING | ERROR
+
+# --- Laser Dot Detection ---
+laser:
+  enabled: true
+  hue_low_upper: 5      # TIGHTENED (from 10): Skin is usually hue 5-15. This strictly ignores skin.
+  hue_high_lower: 175   # TIGHTENED (from 170): Focuses only on the absolute edge of the red spectrum.
+  sat_min: 120          # LOWERED (from 150): Allows the laser to be detected even when skin absorbs some color.
+  val_min: 160          # LOWERED (from 200): Allows the laser to be detected when it's not reflecting off a bright white wall.
+  min_area: 2.0         
+  max_area: 800.0       
+  min_circularity: 0.1  
+  roi_radius_px: 150.0    # Tighter ROI — Kalman prediction is accurate enough
+  max_jump_px: 50.0       # Reject detections that jump >N px from predicted position
+  min_brightness: 200     # Minimum brightness (0-255) to accept a blob as laser
+
+# --- Laser Boresight Offset ---
+laser_boresight:
+  source: auto             # auto = load from calibration_data/servo_limits.json; inline = use values below
+  pan_offset_deg: 0.0
+  tilt_offset_deg: 0.0
+
+# --- Tracking ---
+tracking:
+  confidence_threshold: 0.50   # Detection confidence gate (raised: reject false positives)
+  hold_time_s: 2.0             # Hold last position after target lost (seconds)
+  max_lost_frames: 90          # Frames before dropping a track (~1.5s @ 60fps)
+  process_noise: 3.5           # Kalman Q (lowered: trust model more, smoother state estimate)
+  measurement_noise: 15.0      # Kalman R (raised: less reactive to pixel noise from ego-motion)
+  tracker_match_threshold: 0.55  # ByteTrack IoU match threshold
+  tracker_track_threshold: 0.25  # ByteTrack high-confidence split
+  tracker_birth_min_hits: 3      # Require 3 hits before promoting track
+
+  # --- Kalman filter ---
+  kalman:
+    innovation_gate_sigma: 5.0     # Reject measurements this many sigma from prediction
+    adaptive_r_min: 12.0           # Min measurement noise (fast motion) — raised: ego-motion adds measurement uncertainty
+    adaptive_r_max: 25.0           # Max measurement noise (slow/noisy) — raised: favors smoothness at rest
+    adaptive_r_speed_thresh: 100.0 # Speed (px/s) at which R reaches min (lowered: 200→100, R adapts sooner)
+    adaptive_q_max_multiplier: 3.0 # Process noise multiplier at high speed (increased for fast motion)
+    adaptive_q_speed_thresh: 200.0 # Speed (px/s) where Q starts ramping up (lowered)
+    adaptive_q_speed_ceil: 400.0   # Speed (px/s) where Q hits max multiplier (lowered)
+    max_consecutive_predictions: 30  # Max prediction-only frames before reset
+    max_consecutive_gated: 3       # Max rejected measurements before soft reset
+    oru_cache_size: 5              # OC-SORT re-update: cached observations
+    prediction_decay_start: 10     # Start decaying velocity after N predictions (faster fade)
+    prediction_velocity_decay: 0.90 # Velocity multiplier per extra prediction frame
+
+  # --- 1Euro smoothing (lower mincutoff = smoother, higher beta = less lag) ---
+  smoothing:
+    display_mincutoff: 0.1       # Display/visualization path
+    display_beta: 0.05
+    servo_mincutoff: 10.0        # Servo path: 10 Hz min cutoff (nearly transparent — minimise phase lag in feedback loop)
+    servo_beta: 0.2              # Low speed-adaptive opening (base cutoff already high)
+    dcutoff: 1.0                 # Derivative cutoff (usually leave at 1.0)
+
+  # --- Optical flow keypoint refinement ---
+  optical_flow:
+    enabled: false               # Disabled — saves ~7-10ms/frame on GTX 1650
+    win_size: 15                 # LK pyramid window size
+    max_level: 2                 # LK pyramid levels
+    flow_weight: 0.7             # Blend (0 = NN only, 1 = flow only)
+    min_confidence: 0.3          # Below this, trust NN over flow
+
+  # --- Centroid postprocessing (outlier rejection, keypoint weighting) ---
+  postprocess:
+    mad_scale: 3.0               # MAD outlier threshold (sigma)
+    conf_ema_alpha: 0.2          # Keypoint confidence EMA smoothing
+    mad_min_points: 3            # Min keypoints needed for MAD filtering
+    high_quality_min_keypoints: 2  # Keypoints needed for "high quality" centroid (lowered for DroidCam)
+    high_quality_min_conf: 0.25  # Min avg confidence for high quality (lowered for DroidCam)
+    medium_quality_alpha_reduction: 0.10  # EMA alpha reduction for medium quality
+    nose_priority_threshold: 0.15 # Nose confidence above this gets priority blend (low: anchors centroid to face)
+    nose_priority_blend: 0.60    # Weight of nose in priority blend (increased for head focus)
+    body_fallback_head_weight: 0.6  # Head weight when falling back to body centroid
+
+  # --- Adaptive auto-tuning (confidence & hold time adjust to conditions) ---
+  adaptive:
+    detection_window: 120        # Rolling window size for detection reliability
+    speed_window: 60             # Rolling window size for speed estimation
+    min_detection_samples: 30    # Min samples before confidence auto-tune kicks in
+    min_speed_samples: 10        # Min samples before hold time auto-tune kicks in
+    reliability_low: 0.70        # Below this → lower confidence threshold
+    reliability_high: 0.90       # Above this → raise confidence threshold
+    conf_floor: 0.15             # Lowest confidence threshold allowed (was 0.30)
+    conf_ceiling: 0.55           # Highest confidence threshold allowed
+    conf_reduction: 0.05         # How much to reduce when unreliable
+    conf_raise: 0.02             # How much to raise when reliable
+    fast_speed_thresh: 200.0     # Speed (px/s) considered "fast"
+    slow_speed_thresh: 50.0      # Speed (px/s) considered "slow"
+    hold_time_min_s: 0.3         # Shortest hold time (fast motion)
+    hold_time_max_s: 1.0         # Longest hold time (slow/static)
+    hold_time_fast_reduction: 0.20  # Reduce hold by this at fast speed
+    hold_time_slow_increase: 0.15   # Increase hold by this at slow speed
+
+    # --- Slew freeze (camera-on-gimbal: freeze tuning during fast slews) ---
+    slew_freeze_threshold_deg_s: 45.0   # Angular speed above which adaptive tuning freezes (lowered: ego-motion trips earlier)
+    slew_freeze_hold_frames: 20         # Frames to hold freeze after speed drops (extended: let motion-blur artifacts fully settle)
+
+# --- Dog-specific tracking overrides (applied only when target=dog) ---
+# Values here override the hardcoded dog defaults in config.py AND the
+# generic tracking section above.  Remove a key to fall back to default.
+tracking_dog:
+  confidence_threshold: 0.35
+  hold_time_s: 0.4
+  max_lost_frames: 120
+  kalman:
+    innovation_gate_sigma: 6.0
+    adaptive_r_speed_thresh: 120.0
+    adaptive_q_speed_ceil: 500.0
+    max_consecutive_predictions: 60
+    prediction_decay_start: 6
+    prediction_velocity_decay: 0.80
+  adaptive:
+    fast_speed_thresh: 150.0
+    slow_speed_thresh: 30.0
+    conf_floor: 0.25
+  smoothing:
+    servo_mincutoff: 12.0
+    servo_beta: 0.5
+
+# --- Visual Servo (closed-loop laser-guided PID) ---
+visual_servo:
+  enabled: false               # Set true to enable PID closed-loop when laser visible
+  kp: 0.4                     # Proportional gain
+  ki: 0.05                    # Integral gain (zeroes steady-state backlash)
+  kd: 0.1                     # Derivative gain (damps oscillation)
+  integral_limit_deg: 5.0     # Anti-windup integral clamp (degrees)
+  entry_threshold_frames: 5   # Consecutive laser frames before entering VISUAL_SERVO
+  exit_threshold_frames: 10   # Consecutive no-laser frames before falling back to ACQUISITION
+  association_radius_px: 100.0  # Max px distance target↔laser to count as "near"
+  max_correction_deg: 45.0    # Max PID correction from open-loop baseline
+
+# --- Relay (GPIO 6, toggled by 'O' key) ---
+relay:
+  pulse_ms: 150           # How long relay stays ON per press (milliseconds)
+
+# --- Preflight (phone camera health monitoring) ---
+preflight:
+  enabled: true
+  window_size: 60                 # Rolling window size (frames)
+  brightness_stddev_warn: 18.0    # Brightness stddev above this → AE hunting warning
+  sharpness_drop_warn: 0.65       # MJPEG compression causes ~50% variation; raised from 0.4
+  warn_cooldown_s: 30.0           # Debounce repeated warnings (seconds)

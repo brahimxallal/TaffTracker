@@ -1,0 +1,97 @@
+# ============================================================
+#  Vision Gimbal Tracker — .gitignore
+# ============================================================
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
+
+# --- Virtual environment ---
+.venv/
+venv/
+env/
+
+# --- Testing & coverage ---
+.coverage
+.coverage.*
+htmlcov/
+.pytest_cache/
+
+# --- IDE ---
+.idea/
+.claude/
+*.swp
+*.swo
+*~
+
+# --- OS ---
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# --- TensorRT engines (large, machine-specific) ---
+engines/*.engine
+engines/*.onnx
+
+# --- Models (large, tracked via LFS or downloaded) ---
+models/*.pt
+models/**/*.pt
+
+# --- Calibration data (generated per-camera) ---
+calibration_data/*.npz
+calibration_data/int8_calib/
+calibration_data/servo_limits.json
+
+# --- Videos (large test assets) ---
+videos/**
+!videos/.gitkeep
+videos/*.mp4
+videos/*.avi
+
+# --- Firmware secrets ---
+firmware/**/wifi_secrets.env
+videos/*.mov
+videos/*.mkv
+videos/*.webm
+videos/*.m4v
+
+# --- Logs ---
+logs/**
+!logs/.gitkeep
+logs/*.csv
+logs/*.log
+logs/recordings/
+
+# --- Firmware build output ---
+firmware/esp32s3_gimbal/.pio/
+firmware/esp32s3_gimbal/.vscode/
+firmware/esp32s3_gimbal/sdkconfig
+firmware/esp32s3_gimbal/managed_components/
+firmware/esp32s3_gimbal/compile_commands.json
+
+# --- Secrets ---
+.env
+.env.*
+!.env.example
+firmware/**/*.env
+!firmware/**/*.env.example
+
+# --- Tooling caches ---
+.ruff_cache/
+.mypy_cache/
+
+# --- Large/ephemeral artifacts ---
+backup_pre_refactor_*.tar
+calibration_data/*.png
+
+# --- Misc ---
+*.bak
+*.tmp
+*.tar
+checkerboard_*.png

@@ -1,0 +1,175 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "Firmware: Build",
+			"type": "shell",
+			"command": "pio",
+			"args": [
+				"run",
+				"-e",
+				"${input:firmwareEnv}"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}/firmware/esp32s3_gimbal",
+				"env": {
+					"PLATFORMIO_CORE_DIR": "C:\\PIO"
+				}
+			},
+			"group": {
+				"kind": "build",
+				"isDefault": true
+			},
+			"problemMatcher": [
+				"$gcc"
+			],
+			"presentation": {
+				"reveal": "always",
+				"panel": "shared",
+				"clear": true
+			},
+			"detail": "Build the selected PlatformIO environment."
+		},
+		{
+			"label": "Firmware: Rebuild",
+			"type": "shell",
+			"command": "cmd",
+			"args": [
+				"/d",
+				"/c",
+				"pio run -e ${input:firmwareEnv} -t clean && pio run -e ${input:firmwareEnv}"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}/firmware/esp32s3_gimbal",
+				"env": {
+					"PLATFORMIO_CORE_DIR": "C:\\PIO"
+				}
+			},
+			"group": "build",
+			"problemMatcher": [
+				"$gcc"
+			],
+			"presentation": {
+				"reveal": "always",
+				"panel": "shared",
+				"clear": true
+			},
+			"detail": "Clean and rebuild the selected PlatformIO environment."
+		},
+		{
+			"label": "Firmware: Clean",
+			"type": "shell",
+			"command": "pio",
+			"args": [
+				"run",
+				"-e",
+				"${input:firmwareEnv}",
+				"-t",
+				"clean"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}/firmware/esp32s3_gimbal",
+				"env": {
+					"PLATFORMIO_CORE_DIR": "C:\\PIO"
+				}
+			},
+			"problemMatcher": [],
+			"presentation": {
+				"reveal": "always",
+				"panel": "shared",
+				"clear": true
+			},
+			"detail": "Remove the selected PlatformIO build output."
+		},
+		{
+			"label": "Firmware: Upload",
+			"type": "shell",
+			"command": "pio",
+			"args": [
+				"run",
+				"-e",
+				"${input:firmwareEnv}",
+				"-t",
+				"upload"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}/firmware/esp32s3_gimbal",
+				"env": {
+					"PLATFORMIO_CORE_DIR": "C:\\PIO"
+				}
+			},
+			"problemMatcher": [
+				"$gcc"
+			],
+			"presentation": {
+				"reveal": "always",
+				"panel": "shared",
+				"clear": true
+			},
+			"detail": "Build and upload the selected PlatformIO environment."
+		},
+		{
+			"label": "Firmware: Monitor",
+			"type": "shell",
+			"command": "pio",
+			"args": [
+				"run",
+				"-e",
+				"${input:firmwareEnv}",
+				"-t",
+				"monitor"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}/firmware/esp32s3_gimbal",
+				"env": {
+					"PLATFORMIO_CORE_DIR": "C:\\PIO"
+				}
+			},
+			"isBackground": true,
+			"problemMatcher": [],
+			"presentation": {
+				"reveal": "always",
+				"panel": "dedicated",
+				"clear": true
+			},
+			"detail": "Open the serial monitor for the selected PlatformIO environment."
+		},
+		{
+			"label": "Firmware: Refresh Compile DB",
+			"type": "shell",
+			"command": "pio",
+			"args": [
+				"run",
+				"-e",
+				"${input:firmwareEnv}",
+				"-t",
+				"compiledb"
+			],
+			"options": {
+				"cwd": "${workspaceFolder}/firmware/esp32s3_gimbal",
+				"env": {
+					"PLATFORMIO_CORE_DIR": "C:\\PIO"
+				}
+			},
+			"problemMatcher": [],
+			"presentation": {
+				"reveal": "always",
+				"panel": "shared",
+				"clear": true
+			},
+			"detail": "Regenerate compile_commands.json for IntelliSense."
+		}
+	],
+	"inputs": [
+		{
+			"id": "firmwareEnv",
+			"type": "pickString",
+			"description": "PlatformIO environment",
+			"default": "esp32s3",
+			"options": [
+				"esp32s3",
+				"esp32s3_ch341"
+			]
+		}
+	]
+}

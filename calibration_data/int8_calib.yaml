@@ -1,0 +1,7 @@
+# Auto-generated INT8 calibration dataset
+path: C:\AAA\calibration_data\int8_calib
+train: images/train
+val: images/train
+kpt_shape: [17, 3]
+names:
+  0: object

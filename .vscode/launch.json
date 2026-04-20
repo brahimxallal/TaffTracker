@@ -1,0 +1,35 @@
+{
+	"version": "0.2.0",
+	"configurations": [
+		{
+			"name": "Firmware: Upload (esp32s3)",
+			"type": "node-terminal",
+			"request": "launch",
+			"command": "pio run -e esp32s3 -t upload",
+			"cwd": "${workspaceFolder}/firmware/esp32s3_gimbal",
+			"env": {
+				"PLATFORMIO_CORE_DIR": "C:\\PIO"
+			}
+		},
+		{
+			"name": "Firmware: Upload + Monitor (esp32s3)",
+			"type": "node-terminal",
+			"request": "launch",
+			"command": "pio run -e esp32s3 -t upload -t monitor",
+			"cwd": "${workspaceFolder}/firmware/esp32s3_gimbal",
+			"env": {
+				"PLATFORMIO_CORE_DIR": "C:\\PIO"
+			}
+		},
+		{
+			"name": "Firmware: Monitor (esp32s3)",
+			"type": "node-terminal",
+			"request": "launch",
+			"command": "pio run -e esp32s3 -t monitor",
+			"cwd": "${workspaceFolder}/firmware/esp32s3_gimbal",
+			"env": {
+				"PLATFORMIO_CORE_DIR": "C:\\PIO"
+			}
+		}
+	]
+}
