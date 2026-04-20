@@ -42,13 +42,18 @@ This repository is a low-latency vision-guided gimbal tracker with a Python mult
 
 ## Key Files
 
-- `src/main.py`: process orchestration, startup validation, and shutdown flow
+- `src/main.py`: process orchestration, startup validation, and shutdown flow (UI helpers live in `src/ui/`)
+- `src/ui/overlays.py`: pure OpenCV renderers for the help panel and laser-cal HUD
+- `src/ui/hotkeys.py`: keyboard-event dispatch rules for the main display loop
 - `src/capture/process.py`: frame capture and ring-buffer writes
+- `src/capture/preflight.py`: thin re-export shim; real `FrameHealthMonitor` lives in `src/shared/preflight.py`
 - `src/inference/process.py`: TensorRT inference, tracking, smoothing, and parallax-aware angle generation
 - `src/inference/postprocess.py`: YOLO parsing and centroid selection logic
 - `src/output/process.py`: protocol encoding, comms, and output fail-safe behavior
+- `src/output/diagnostics.py`: `draw_diagnostics` + `get_transport_status` HUD helpers for the output process
 - `src/shared/ring_buffer.py`: shared-memory transport implementation
 - `src/shared/protocol.py`: binary packet format used by firmware
+- `src/shared/preflight.py`: `FrameHealthMonitor` AE/AWB/AF-drift detector (consumed by the inference process)
 - `src/calibration/camera_model.py`: camera geometry and pixel-to-angle conversion
 - `src/calibration/depth_estimator.py`: pose-span depth estimation used by parallax correction
 - `config.yaml`: runtime tuning and hardware alignment source of truth
