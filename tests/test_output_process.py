@@ -611,7 +611,7 @@ def test_run_loop_logs_display_backpressure_warning_once_per_window(monkeypatch,
 def test_create_sender_serial(monkeypatch) -> None:
     proc = _make_full_proc(comm_config=CommConfig(channel="serial", serial_port="COM99"))
     mock_serial = MagicMock()
-    monkeypatch.setattr("src.output.process.SerialComm", lambda port, baud: mock_serial)
+    monkeypatch.setattr("src.output.sender_factory.SerialComm", lambda port, baud: mock_serial)
 
     result = proc._create_sender()
 
@@ -622,7 +622,7 @@ def test_create_sender_serial(monkeypatch) -> None:
 def test_create_sender_udp(monkeypatch) -> None:
     proc = _make_full_proc(comm_config=CommConfig(channel="udp", udp_host="1.2.3.4", udp_port=9999))
     mock_udp = MagicMock()
-    monkeypatch.setattr("src.output.process.UDPComm", lambda host, port, **kw: mock_udp)
+    monkeypatch.setattr("src.output.sender_factory.UDPComm", lambda host, port, **kw: mock_udp)
 
     result = proc._create_sender()
 
@@ -632,7 +632,9 @@ def test_create_sender_udp(monkeypatch) -> None:
 @pytest.mark.unit
 def test_create_sender_returns_none_on_failure(monkeypatch) -> None:
     proc = _make_full_proc(comm_config=CommConfig(channel="serial", serial_port="COM99"))
-    monkeypatch.setattr("src.output.process.SerialComm", MagicMock(side_effect=OSError("no port")))
+    monkeypatch.setattr(
+        "src.output.sender_factory.SerialComm", MagicMock(side_effect=OSError("no port"))
+    )
 
     result = proc._create_sender()
 
@@ -647,7 +649,7 @@ def test_create_sender_auto_returns_auto_transport(monkeypatch) -> None:
         )
     )
     sentinel = MagicMock(spec=AutoCommTransport)
-    monkeypatch.setattr("src.output.process.AutoCommTransport", lambda config: sentinel)
+    monkeypatch.setattr("src.output.sender_factory.AutoCommTransport", lambda config: sentinel)
 
     result = proc._create_sender()
 
@@ -662,7 +664,7 @@ def test_create_sender_auto_returns_none_when_transport_init_fails(monkeypatch) 
         )
     )
     monkeypatch.setattr(
-        "src.output.process.AutoCommTransport",
+        "src.output.sender_factory.AutoCommTransport",
         MagicMock(side_effect=RuntimeError("boom")),
     )
 

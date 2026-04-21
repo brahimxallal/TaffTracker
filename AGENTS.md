@@ -53,6 +53,8 @@ This repository is a low-latency vision-guided gimbal tracker with a Python mult
 - `src/inference/postprocess.py`: YOLO parsing and centroid selection logic
 - `src/output/process.py`: protocol encoding, comms, and output fail-safe behavior
 - `src/output/diagnostics.py`: `draw_diagnostics` + `get_transport_status` HUD helpers for the output process
+- `src/output/sender_factory.py`: `create_sender(comm_config)` — chooses Serial/UDP/Auto transport
+- `src/output/telemetry.py`: `write_metrics_summary` — shutdown-time JSON snapshot of packet + display stats
 - `src/shared/ring_buffer.py`: shared-memory transport implementation
 - `src/shared/protocol.py`: binary packet format used by firmware
 - `src/shared/preflight.py`: `FrameHealthMonitor` AE/AWB/AF-drift detector (consumed by the inference process)

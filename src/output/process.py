@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import logging
 import multiprocessing as mp
 import struct
@@ -9,7 +8,6 @@ import time
 from dataclasses import replace
 from math import copysign, degrees
 from multiprocessing.sharedctypes import Synchronized
-from pathlib import Path
 from queue import Empty
 from traceback import format_exc
 
@@ -22,10 +20,9 @@ from src.config import (
     ServoControlConfig,
     TrackingConfig,
 )
-from src.output.auto_comm import AutoCommTransport
 from src.output.diagnostics import draw_diagnostics, get_transport_status
-from src.output.serial_comm import SerialComm
-from src.output.udp_comm import UDPComm
+from src.output.sender_factory import create_sender
+from src.output.telemetry import write_metrics_summary
 from src.output.visualizer import FrameSmoother, draw_overlay
 from src.shared.display_buffer import DisplayBufferLayout, SharedDisplayBuffer
 from src.shared.profiler import StageProfiler
@@ -413,37 +410,15 @@ class OutputProcess(mp.Process):
         display_drops: int,
         display_total: int,
     ) -> None:
-        log_dir = Path("logs")
-        log_dir.mkdir(parents=True, exist_ok=True)
-        metrics_path = log_dir / "output_metrics.json"
-        send_stats = profiler.get_snapshot("packet_send")
-        duration_s = max(time.perf_counter() - run_start, 1e-6)
-        packets_sent = int(getattr(sender, "packets_sent", 0)) if sender is not None else 0
-        packets_failed = int(getattr(sender, "packets_failed", 0)) if sender is not None else 0
-        payload = {
-            "duration_s": duration_s,
-            "display_drops": display_drops,
-            "display_total": display_total,
-            "display_drop_rate": (
-                (display_drops / max(1, display_total)) if display_total > 0 else 0.0
-            ),
-            "packets_sent": packets_sent,
-            "packets_failed": packets_failed,
-            "packet_send_rate_hz": packets_sent / duration_s,
-            "packet_send_latency_ms": (
-                {
-                    "count": send_stats.count,
-                    "last_ms": send_stats.last_ms,
-                    "mean_ms": send_stats.mean_ms,
-                    "p50_ms": send_stats.p50_ms,
-                    "p95_ms": send_stats.p95_ms,
-                    "p99_ms": send_stats.p99_ms,
-                }
-                if send_stats is not None
-                else None
-            ),
-        }
-        metrics_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        # Thin wrapper around src.output.telemetry.write_metrics_summary.
+        # Kept as an instance method so existing call sites stay unchanged.
+        write_metrics_summary(
+            profiler,
+            sender,
+            run_start,
+            display_drops,
+            display_total,
+        )
 
     def _reset_manual_command_history(self) -> None:
         self._last_manual_pan_deg = None
@@ -490,36 +465,8 @@ class OutputProcess(mp.Process):
         return pan_vel_dps, tilt_vel_dps
 
     def _create_sender(self):
-        channel = self._comm_config.channel
-        if channel == "auto":
-            try:
-                return AutoCommTransport(self._comm_config)
-            except Exception as exc:
-                LOGGER.warning(
-                    "Could not initialize auto comm transport (%s). Visualization only.", exc
-                )
-                return None
-        try:
-            if channel == "serial":
-                LOGGER.info("Opening serial output on %s", self._comm_config.serial_port)
-                return SerialComm(self._comm_config.serial_port, self._comm_config.baud_rate)
-            LOGGER.info(
-                "Opening UDP output on %s:%s",
-                self._comm_config.udp_host,
-                self._comm_config.udp_port,
-            )
-            return UDPComm(
-                self._comm_config.udp_host,
-                self._comm_config.udp_port,
-                redundancy=self._comm_config.udp_redundancy,
-            )
-        except Exception as exc:
-            LOGGER.warning(
-                "Could not open %s comm (%s). Running visualization only.",
-                channel,
-                exc,
-            )
-            return None
+        # Thin wrapper around src.output.sender_factory.create_sender.
+        return create_sender(self._comm_config)
 
     def _apply_fail_safe(
         self, message: TrackingMessage, last_valid_message: TrackingMessage | None
