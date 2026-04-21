@@ -55,7 +55,7 @@ This repository is a low-latency vision-guided gimbal tracker with a Python mult
 - `src/output/diagnostics.py`: `draw_diagnostics` + `get_transport_status` HUD helpers for the output process
 - `src/output/sender_factory.py`: `create_sender(comm_config)` — chooses Serial/UDP/Auto transport
 - `src/output/telemetry.py`: `write_metrics_summary` — shutdown-time JSON snapshot of packet + display stats
-- `src/output/manual_control.py`: `ManualVelocityTracker` + `boost_manual_velocity` — manual-mode velocity differentiator and response-floor helper
+- `src/output/manual_control.py`: `ManualVelocityTracker` + `boost_manual_velocity` + `build_manual_packet` + `rewrite_packet_sequence` — manual-mode velocity differentiator, response-floor helper, v2 packet builder, and post-lock sequence/CRC rewriter
 - `src/shared/ring_buffer.py`: shared-memory transport implementation
 - `src/shared/protocol.py`: binary packet format used by firmware
 - `src/shared/preflight.py`: `FrameHealthMonitor` AE/AWB/AF-drift detector (consumed by the inference process)

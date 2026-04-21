@@ -1,22 +1,38 @@
-"""Manual-mode velocity helpers for the output process.
+"""Manual-mode helpers for the output process.
 
 Extracted from ``src/output/process.py``. Manual mode bypasses the
 Kalman + PID path and sends absolute pan/tilt angles directly, so it
-needs its own velocity-estimation and minimum-response-speed logic.
+needs its own velocity-estimation, minimum-response-speed, and
+packet-building logic.
 
 Split out to keep the orchestrator focused on the auto-tracking
-pipeline. All state lives inside :class:`ManualVelocityTracker`; the
-free function :func:`boost_manual_velocity` is pure.
+pipeline. State lives inside :class:`ManualVelocityTracker`; every
+other helper here is a pure function.
 """
 
 from __future__ import annotations
 
+import struct
 from dataclasses import dataclass
 from math import copysign
+
+from src.shared.protocol import (
+    FLAG_LASER_ON,
+    FLAG_RELAY_ON,
+    QUALITY_FLAG_MANUAL,
+    build_state_flags,
+    checksum_bytes,
+    encode_packet_v2,
+)
 
 # Cap dt so a long pause between manual commands does not produce a
 # pathological velocity spike on the next frame.
 _MAX_DT_S = 0.1
+
+# Protocol v2 packet layout constants (see src/shared/protocol.py).
+_SEQUENCE_OFFSET = 1  # bytes 1..2 = sequence (little-endian uint16)
+_CHECKSUM_OFFSET = 19  # bytes 19..20 = CRC over payload bytes 1..19
+_CHECKSUM_PAYLOAD_END = 19
 
 
 def boost_manual_velocity(velocity_dps: float, floor_dps: float) -> float:
@@ -84,3 +100,58 @@ class ManualVelocityTracker:
         self._last_tilt_deg = tilt_deg
         self._last_timestamp_ns = timestamp_ns
         return pan_vel_dps, tilt_vel_dps
+
+
+def build_manual_packet(
+    pan_deg: float,
+    tilt_deg: float,
+    pan_vel_dps: float,
+    tilt_vel_dps: float,
+    now_ns: int,
+    laser_enabled: bool,
+    relay_on: bool,
+) -> bytes:
+    """Build a v2 manual-mode packet with ``sequence=0``.
+
+    The sequence number is filled in later under the send lock using
+    :func:`rewrite_packet_sequence`. Everything else — state flags,
+    timestamp, angles, velocities, quality byte — is produced here so
+    the hot loop keeps the critical section tiny.
+    """
+    vel_mag = (pan_vel_dps**2 + tilt_vel_dps**2) ** 0.5
+    state = build_state_flags(
+        state_source="measurement",
+        target_acquired=False,
+        confidence=0.0,
+        velocity_magnitude_dps=vel_mag,
+        is_occlusion_recovery=False,
+    )
+    if laser_enabled:
+        state |= FLAG_LASER_ON
+    if relay_on:
+        state |= FLAG_RELAY_ON
+    return encode_packet_v2(
+        sequence=0,  # rewritten under the send lock by rewrite_packet_sequence
+        timestamp_ms=(now_ns // 1_000_000) & 0xFFFFFFFF,
+        pan=int(round(pan_deg * 100.0)),
+        tilt=int(round(tilt_deg * 100.0)),
+        pan_vel=int(round(pan_vel_dps * 100.0)),
+        tilt_vel=int(round(tilt_vel_dps * 100.0)),
+        confidence=0,
+        state=state,
+        quality=QUALITY_FLAG_MANUAL,
+        latency=0,
+    )
+
+
+def rewrite_packet_sequence(packet: bytes, sequence: int) -> bytes:
+    """Patch the sequence number into ``packet`` and recompute the CRC.
+
+    The caller typically reserves a sequence under a lock and then calls
+    this outside the lock to minimise critical-section time.
+    """
+    buf = bytearray(packet)
+    struct.pack_into("<H", buf, _SEQUENCE_OFFSET, sequence & 0xFFFF)
+    crc = checksum_bytes(bytes(buf[1:_CHECKSUM_PAYLOAD_END]))
+    struct.pack_into("<H", buf, _CHECKSUM_OFFSET, crc)
+    return bytes(buf)

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import multiprocessing as mp
-import struct
 import threading
 import time
 from dataclasses import replace
@@ -21,7 +20,12 @@ from src.config import (
     TrackingConfig,
 )
 from src.output.diagnostics import draw_diagnostics, get_transport_status
-from src.output.manual_control import ManualVelocityTracker, boost_manual_velocity
+from src.output.manual_control import (
+    ManualVelocityTracker,
+    boost_manual_velocity,
+    build_manual_packet,
+    rewrite_packet_sequence,
+)
 from src.output.sender_factory import create_sender
 from src.output.telemetry import write_metrics_summary
 from src.output.visualizer import FrameSmoother, draw_overlay
@@ -32,7 +36,6 @@ from src.shared.protocol import (
     FLAG_RELAY_ON,
     QUALITY_FLAG_MANUAL,
     build_state_flags,
-    checksum_bytes,
     encode_packet_v2,
 )
 from src.shared.ring_buffer import RingBufferLayout, SharedRingBuffer
@@ -135,16 +138,12 @@ class OutputProcess(mp.Process):
         tilt_sign = -1.0 if self._gimbal_config.invert_tilt else 1.0
         pan_lim = self._gimbal_config.pan_limit_deg
         tilt_lim = self._gimbal_config.tilt_limit_deg
-        prev_pan_deg: float | None = None
-        prev_tilt_deg: float | None = None
-        prev_ts_ns: int | None = None
+        velocity_tracker = ManualVelocityTracker()
 
         while not shutdown_event.is_set():
             is_manual = self._manual_mode is not None and bool(self._manual_mode.value)
             if not is_manual or sender is None:
-                prev_pan_deg = None
-                prev_tilt_deg = None
-                prev_ts_ns = None
+                velocity_tracker.reset()
                 time.sleep(TICK_S)
                 continue
 
@@ -159,59 +158,27 @@ class OutputProcess(mp.Process):
             tilt_deg = manual_tilt_deg * tilt_sign
             now_ns = time.perf_counter_ns()
 
-            # Velocity estimate
-            pan_vel_dps = 0.0
-            tilt_vel_dps = 0.0
-            if prev_ts_ns is not None and prev_pan_deg is not None and now_ns > prev_ts_ns:
-                dt = min((now_ns - prev_ts_ns) / 1e9, 0.1)
-                if dt > 0:
-                    pan_vel_dps = (pan_deg - prev_pan_deg) / dt
-                    tilt_vel_dps = (tilt_deg - prev_tilt_deg) / dt
-            prev_pan_deg = pan_deg
-            prev_tilt_deg = tilt_deg
-            prev_ts_ns = now_ns
-
+            pan_vel_dps, tilt_vel_dps = velocity_tracker.compute_velocity_dps(
+                pan_deg, tilt_deg, now_ns
+            )
             pan_vel_dps = self._boost_manual_velocity(pan_vel_dps)
             tilt_vel_dps = self._boost_manual_velocity(tilt_vel_dps)
-            vel_mag = (pan_vel_dps**2 + tilt_vel_dps**2) ** 0.5
 
-            state = build_state_flags(
-                state_source="measurement",
-                target_acquired=False,
-                confidence=0.0,
-                velocity_magnitude_dps=vel_mag,
-                is_occlusion_recovery=False,
-            )
-            laser_enabled = self._is_laser_enabled()
-            if laser_enabled:
-                state |= FLAG_LASER_ON
-            if self._relay_flag is not None and self._relay_flag.value:
-                state |= FLAG_RELAY_ON
-
-            packet = encode_packet_v2(
-                sequence=0,  # overwritten under lock
-                timestamp_ms=(now_ns // 1_000_000) & 0xFFFFFFFF,
-                pan=int(round(pan_deg * 100.0)),
-                tilt=int(round(tilt_deg * 100.0)),
-                pan_vel=int(round(pan_vel_dps * 100.0)),
-                tilt_vel=int(round(tilt_vel_dps * 100.0)),
-                confidence=0,
-                state=state,
-                quality=QUALITY_FLAG_MANUAL,
-                latency=0,
+            relay_on = self._relay_flag is not None and bool(self._relay_flag.value)
+            packet = build_manual_packet(
+                pan_deg=pan_deg,
+                tilt_deg=tilt_deg,
+                pan_vel_dps=pan_vel_dps,
+                tilt_vel_dps=tilt_vel_dps,
+                now_ns=now_ns,
+                laser_enabled=self._is_laser_enabled(),
+                relay_on=relay_on,
             )
 
             with send_lock:
-                # Re-encode with correct sequence number
                 seq = self._manual_sequence
                 self._manual_sequence = (seq + 1) & 0xFFFF
-            # Rebuild packet with real sequence (bytes 1-2)
-            packet = bytearray(packet)
-            struct.pack_into("<H", packet, 1, seq & 0xFFFF)
-            # Recompute checksum over payload (bytes 1..18)
-            crc = checksum_bytes(bytes(packet[1:19]))
-            struct.pack_into("<H", packet, 19, crc)
-            packet = bytes(packet)
+            packet = rewrite_packet_sequence(packet, seq)
 
             if sender.is_connected:
                 sender.send(packet)
