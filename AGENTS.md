@@ -50,6 +50,7 @@ This repository is a low-latency vision-guided gimbal tracker with a Python mult
 - `src/capture/process.py`: frame capture and ring-buffer writes
 - `src/capture/preflight.py`: thin re-export shim; real `FrameHealthMonitor` lives in `src/shared/preflight.py`
 - `src/inference/process.py`: TensorRT inference, tracking, smoothing, and parallax-aware angle generation
+- `src/inference/telemetry.py`: `format_profiler_summary` + `write_profiler_summary` — per-run profiler log line and shutdown-time CSV/JSON metrics dump
 - `src/inference/postprocess.py`: YOLO parsing and centroid selection logic
 - `src/output/process.py`: protocol encoding, comms, and output fail-safe behavior
 - `src/output/diagnostics.py`: `draw_diagnostics` + `get_transport_status` HUD helpers for the output process

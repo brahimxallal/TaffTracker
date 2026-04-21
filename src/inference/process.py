@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import gc
-import json
 import logging
 import multiprocessing as mp
 import time
@@ -33,6 +32,7 @@ from src.inference.postprocess import (
 from src.inference.stages.centroid import CentroidStage
 from src.inference.stages.servo import ServoStage
 from src.inference.stages.tracker import TrackerStage
+from src.inference.telemetry import format_profiler_summary, write_profiler_summary
 from src.inference.trt_engine import TRTEngine
 from src.shared.pose_schema import PoseSchema, get_pose_schema
 from src.shared.profiler import StageProfiler
@@ -505,70 +505,27 @@ class InferenceProcess(mp.Process):
     def _log_profiler_summary(
         self, profiler: StageProfiler, pipeline: TrackingPipeline, fps: float
     ) -> None:
-        wait_stats = profiler.get_percentiles("wait")
-        inference_stats = profiler.get_percentiles("inference")
-        postprocess_stats = profiler.get_percentiles("postprocess")
-        total_stats = profiler.get_percentiles("total_latency")
-        if inference_stats is None:
-            return
-        segments = [f"FPS {fps:.1f}"]
-        if wait_stats is not None:
-            segments.append(
-                f"wait p50/p95/p99 {wait_stats[0]:.1f}/{wait_stats[1]:.1f}/{wait_stats[2]:.1f} ms"
-            )
-        segments.append(
-            f"inf p50/p95/p99 {inference_stats[0]:.1f}/{inference_stats[1]:.1f}/{inference_stats[2]:.1f} ms"
+        line = format_profiler_summary(
+            profiler,
+            pipeline,
+            fps=fps,
+            publish_drop_count=self._publish_drop_count,
         )
-        if postprocess_stats is not None:
-            segments.append(
-                f"post p50/p95/p99 {postprocess_stats[0]:.1f}/{postprocess_stats[1]:.1f}/{postprocess_stats[2]:.1f} ms"
-            )
-        if total_stats is not None:
-            segments.append(
-                f"total p50/p95/p99 {total_stats[0]:.1f}/{total_stats[1]:.1f}/{total_stats[2]:.1f} ms"
-            )
-        if pipeline.measurement_update_count > 0:
-            gate_pct = (
-                pipeline.measurement_gated_count / pipeline.measurement_update_count
-            ) * 100.0
-            segments.append(f"gate_reject {gate_pct:.1f}%")
-        if self._publish_drop_count > 0:
-            segments.append(f"publish_drops {self._publish_drop_count}")
-        LOGGER.info(
-            "Profiler summary | %s",
-            " | ".join(segments),
-        )
+        if line is not None:
+            LOGGER.info("Profiler summary | %s", line)
 
     def _write_profiler_summary(self, profiler: StageProfiler, pipeline: TrackingPipeline) -> None:
         csv_path = self._runtime_paths.profiler_csv_path(self._mode, self._target)
         summary_path = self._runtime_paths.profiler_summary_path()
         metrics_path = self._runtime_paths.inference_metrics_path()
-        profiler.write_csv(csv_path)
-        profiler.write_csv(summary_path)
-        metrics_path.parent.mkdir(parents=True, exist_ok=True)
-        gate_rate = (
-            pipeline.measurement_gated_count / pipeline.measurement_update_count
-            if pipeline.measurement_update_count > 0
-            else 0.0
+        write_profiler_summary(
+            profiler,
+            pipeline,
+            csv_path=csv_path,
+            summary_path=summary_path,
+            metrics_path=metrics_path,
+            publish_drop_count=self._publish_drop_count,
         )
-        payload = {
-            "publish_drop_count": self._publish_drop_count,
-            "measurement_update_count": pipeline.measurement_update_count,
-            "measurement_gated_count": pipeline.measurement_gated_count,
-            "gate_rejection_rate": gate_rate,
-            "stages": {
-                name: {
-                    "count": snapshot.count,
-                    "last_ms": snapshot.last_ms,
-                    "mean_ms": snapshot.mean_ms,
-                    "p50_ms": snapshot.p50_ms,
-                    "p95_ms": snapshot.p95_ms,
-                    "p99_ms": snapshot.p99_ms,
-                }
-                for name, snapshot in profiler.get_stats().items()
-            },
-        }
-        metrics_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
         LOGGER.info("Profiler summaries saved to %s and %s", csv_path, summary_path)
 
     def _report_error(self, exc: BaseException) -> None:
