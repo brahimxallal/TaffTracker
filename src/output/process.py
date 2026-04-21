@@ -6,7 +6,7 @@ import struct
 import threading
 import time
 from dataclasses import replace
-from math import copysign, degrees
+from math import degrees
 from multiprocessing.sharedctypes import Synchronized
 from queue import Empty
 from traceback import format_exc
@@ -21,6 +21,7 @@ from src.config import (
     TrackingConfig,
 )
 from src.output.diagnostics import draw_diagnostics, get_transport_status
+from src.output.manual_control import ManualVelocityTracker, boost_manual_velocity
 from src.output.sender_factory import create_sender
 from src.output.telemetry import write_metrics_summary
 from src.output.visualizer import FrameSmoother, draw_overlay
@@ -98,9 +99,8 @@ class OutputProcess(mp.Process):
         self._prev_d_pan = 0.0
         self._prev_d_tilt = 0.0
         self._last_encode_ts_ns: int | None = None
-        self._last_manual_pan_deg: float | None = None
-        self._last_manual_tilt_deg: float | None = None
-        self._last_manual_timestamp_ns: int | None = None
+        # Manual-mode velocity history is owned by ManualVelocityTracker.
+        self._manual_velocity_tracker = ManualVelocityTracker()
 
     def _read_laser_boresight_pan(self) -> float:
         if self._laser_boresight_pan is None:
@@ -116,10 +116,12 @@ class OutputProcess(mp.Process):
         return self._laser_enabled is None or bool(self._laser_enabled.value)
 
     def _boost_manual_velocity(self, velocity_dps: float) -> float:
-        if abs(velocity_dps) <= 1e-6:
-            return 0.0
-        floor = self._servo_control_config.manual_response_velocity_floor_dps
-        return copysign(max(abs(velocity_dps), floor), velocity_dps)
+        # Thin wrapper around src.output.manual_control.boost_manual_velocity;
+        # keeps existing call sites unchanged.
+        return boost_manual_velocity(
+            velocity_dps,
+            self._servo_control_config.manual_response_velocity_floor_dps,
+        )
 
     def _manual_tick_loop(
         self,
@@ -421,9 +423,7 @@ class OutputProcess(mp.Process):
         )
 
     def _reset_manual_command_history(self) -> None:
-        self._last_manual_pan_deg = None
-        self._last_manual_tilt_deg = None
-        self._last_manual_timestamp_ns = None
+        self._manual_velocity_tracker.reset()
 
     def _record_auto_command(
         self,
@@ -432,6 +432,11 @@ class OutputProcess(mp.Process):
         pan_sign: float,
         tilt_sign: float,
     ) -> None:
+        """Mirror the latest auto command into the shared manual values.
+
+        Ensures a smooth handoff when the user toggles manual mode on —
+        the gimbal resumes from where auto tracking left it.
+        """
         if self._manual_pan is not None:
             self._manual_pan.value = pan_deg * pan_sign
         if self._manual_tilt is not None:
@@ -443,26 +448,7 @@ class OutputProcess(mp.Process):
         tilt_deg: float,
         timestamp_ns: int,
     ) -> tuple[float, float]:
-        if (
-            self._last_manual_timestamp_ns is None
-            or self._last_manual_pan_deg is None
-            or self._last_manual_tilt_deg is None
-            or timestamp_ns <= self._last_manual_timestamp_ns
-        ):
-            pan_vel_dps = 0.0
-            tilt_vel_dps = 0.0
-        else:
-            dt = min((timestamp_ns - self._last_manual_timestamp_ns) / 1e9, 0.1)
-            if dt <= 0.0:
-                pan_vel_dps = 0.0
-                tilt_vel_dps = 0.0
-            else:
-                pan_vel_dps = (pan_deg - self._last_manual_pan_deg) / dt
-                tilt_vel_dps = (tilt_deg - self._last_manual_tilt_deg) / dt
-        self._last_manual_pan_deg = pan_deg
-        self._last_manual_tilt_deg = tilt_deg
-        self._last_manual_timestamp_ns = timestamp_ns
-        return pan_vel_dps, tilt_vel_dps
+        return self._manual_velocity_tracker.compute_velocity_dps(pan_deg, tilt_deg, timestamp_ns)
 
     def _create_sender(self):
         # Thin wrapper around src.output.sender_factory.create_sender.
