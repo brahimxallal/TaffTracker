@@ -104,7 +104,6 @@ class TestConfigLoader:
                 "tracker_match_threshold": 0.6,
                 "kalman": {"innovation_gate_sigma": 5.0},
                 "smoothing": {"display_mincutoff": 0.5},
-                "optical_flow": {"enabled": False},
                 "postprocess": {"body_fallback_head_weight": 0.5},
                 "adaptive": {"fast_speed_thresh": 300.0},
             }
@@ -116,7 +115,6 @@ class TestConfigLoader:
         assert config.tracking.tracker_match_threshold == 0.6
         assert config.tracking.kalman.innovation_gate_sigma == 5.0
         assert config.tracking.smoothing.display_mincutoff == 0.5
-        assert config.tracking.optical_flow.enabled is False
         assert config.tracking.postprocess.body_fallback_head_weight == 0.5
         assert config.tracking.adaptive.fast_speed_thresh == 300.0
 

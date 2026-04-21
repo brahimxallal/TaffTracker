@@ -82,7 +82,6 @@ def test_build_message_reports_egomotion_applied_px_and_limits_false_velocity() 
     from src.tracking.botsort import BoTSORT
     from src.tracking.kalman import KalmanFilter
     from src.tracking.one_euro import OneEuroFilter2D
-    from src.tracking.optical_flow import OpticalFlowRefiner
     from src.tracking.reid import ReIDBuffer
 
     camera_model = CameraModel.from_fov(72.0, 640, 640)
@@ -108,7 +107,6 @@ def test_build_message_reports_egomotion_applied_px_and_limits_false_velocity() 
     servo_stage = ServoStage()
     ema_pixel = OneEuroFilter2D(mincutoff=0.1, beta=0.05, dcutoff=1.0)
     servo_ema_pixel = OneEuroFilter2D(mincutoff=10.0, beta=0.2, dcutoff=1.0)
-    flow_refiner = OpticalFlowRefiner()
     adaptive = AdaptiveController(tracking_config)
 
     pipeline = TrackingPipeline(
@@ -120,8 +118,6 @@ def test_build_message_reports_egomotion_applied_px_and_limits_false_velocity() 
         pose_schema=pose_schema,
         ema_pixel=ema_pixel,
         servo_ema_pixel=servo_ema_pixel,
-        flow_refiner=flow_refiner,
-        flow_enabled=False,
         depth_smoother=None,
     )
 
@@ -148,7 +144,6 @@ def test_build_message_reports_egomotion_applied_px_and_limits_false_velocity() 
         wait_ms=0.0,
         inference_ms=0.0,
         postprocess_ms=0.0,
-        flow_active=False,
     )
     assert was_lost0 is False
 
@@ -166,7 +161,6 @@ def test_build_message_reports_egomotion_applied_px_and_limits_false_velocity() 
         wait_ms=0.0,
         inference_ms=0.0,
         postprocess_ms=0.0,
-        flow_active=False,
     )
 
     assert message0.egomotion_applied_px is None

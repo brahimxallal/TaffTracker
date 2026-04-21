@@ -130,14 +130,6 @@ tracking:
     servo_beta: 0.2              # Low speed-adaptive opening (base cutoff already high)
     dcutoff: 1.0                 # Derivative cutoff (usually leave at 1.0)
 
-  # --- Optical flow keypoint refinement ---
-  optical_flow:
-    enabled: false               # Disabled — saves ~7-10ms/frame on GTX 1650
-    win_size: 15                 # LK pyramid window size
-    max_level: 2                 # LK pyramid levels
-    flow_weight: 0.7             # Blend (0 = NN only, 1 = flow only)
-    min_confidence: 0.3          # Below this, trust NN over flow
-
   # --- Centroid postprocessing (outlier rejection, keypoint weighting) ---
   postprocess:
     mad_scale: 3.0               # MAD outlier threshold (sigma)

@@ -18,7 +18,7 @@ This repository is a low-latency vision-guided gimbal tracker with a Python mult
 - The runtime pipeline is three isolated processes: `CaptureProcess` -> shared ring buffer -> `InferenceProcess` -> result queue -> `OutputProcess`.
 - The main process owns display work; keep `cv2.imshow()` and UI event handling there on Windows.
 - Shared memory is performance-critical. The custom ring buffer uses generation counters and zero-copy frame sharing; avoid adding extra copies on the hot path.
-- Inference flow is: frame read -> undistort -> TensorRT YOLO -> postprocess -> ByteTrack -> Kalman -> centroid selection -> 1 Euro filtering -> optional optical flow / laser detection -> `TrackingMessage`.
+- Inference flow is: frame read -> undistort -> TensorRT YOLO -> postprocess -> BoTSORT -> Kalman -> centroid selection -> 1 Euro filtering -> optional laser detection -> `TrackingMessage`.
 - Output flow is intentionally fire-and-forget over serial or UDP. Do not add retransmission or blocking acknowledgements in the control path.
 - Firmware runs a 200 Hz control loop on ESP32-S3 and applies its own watchdog, smoothing, and home behavior.
 

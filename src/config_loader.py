@@ -253,7 +253,6 @@ def build_config_from_yaml(
         # Generic sub-config loader: reads all fields from the dataclass defaults
         kalman = _overlay_dataclass(tracking.kalman, trk_cfg.get("kalman", {}))
         smoothing = _overlay_dataclass(tracking.smoothing, trk_cfg.get("smoothing", {}))
-        optical_flow = _overlay_dataclass(tracking.optical_flow, trk_cfg.get("optical_flow", {}))
         postprocess = _overlay_dataclass(tracking.postprocess, trk_cfg.get("postprocess", {}))
         adaptive = _overlay_dataclass(tracking.adaptive, trk_cfg.get("adaptive", {}))
 
@@ -261,7 +260,6 @@ def build_config_from_yaml(
         tracking_overrides = {
             "kalman": kalman,
             "smoothing": smoothing,
-            "optical_flow": optical_flow,
             "postprocess": postprocess,
             "adaptive": adaptive,
         }

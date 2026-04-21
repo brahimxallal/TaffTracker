@@ -144,7 +144,6 @@ class InferenceProcess(mp.Process):
         reid_buffer = ReIDBuffer(max_spatial_distance_px=reid_spatial)
 
         from src.tracking.one_euro import OneEuroFilter2D
-        from src.tracking.optical_flow import OpticalFlowRefiner
 
         sm = self._tracking_config.smoothing
         ema_pixel = OneEuroFilter2D(
@@ -152,15 +151,6 @@ class InferenceProcess(mp.Process):
         )
         servo_ema_pixel = OneEuroFilter2D(
             mincutoff=sm.servo_mincutoff, beta=sm.servo_beta, dcutoff=sm.dcutoff
-        )
-        of = self._tracking_config.optical_flow
-        flow_enabled = of.enabled
-        flow_refiner = OpticalFlowRefiner(
-            win_size=of.win_size,
-            max_level=of.max_level,
-            flow_weight=of.flow_weight,
-            min_confidence=of.min_confidence,
-            fb_threshold_px=of.fb_threshold_px,
         )
 
         # Parallax compensation
@@ -245,8 +235,6 @@ class InferenceProcess(mp.Process):
             pose_schema=pose_schema,
             ema_pixel=ema_pixel,
             servo_ema_pixel=servo_ema_pixel,
-            flow_refiner=flow_refiner,
-            flow_enabled=flow_enabled,
             depth_smoother=depth_smoother,
         )
 
@@ -268,9 +256,8 @@ class InferenceProcess(mp.Process):
         frame_drop_count = 0
         frame_total_count = 0
         frames_since_gc = 0
-        _DROP_WINDOW = of.drop_rate_window
-        _DROP_RATE_THRESHOLD = of.drop_rate_disable_threshold
-        flow_auto_disabled = False
+        # Rolling drop-rate telemetry: flushes every _DROP_WINDOW frames.
+        _DROP_WINDOW = 120
         _FRAME_TIMEOUT_NS = int(3.0 / max(self._camera_config.fps, 1) * 1_000_000_000)
         _last_frame_received_ns = perf_counter_ns()
 
@@ -302,16 +289,6 @@ class InferenceProcess(mp.Process):
                         frame_drop_count += skipped - 1
                 frame_total_count += 1
                 if frame_total_count % _DROP_WINDOW == 0:
-                    drop_rate = frame_drop_count / max(1, frame_total_count)
-                    if flow_enabled and drop_rate > _DROP_RATE_THRESHOLD and not flow_auto_disabled:
-                        flow_auto_disabled = True
-                        LOGGER.warning(
-                            "High frame drop rate %.1f%% — auto-disabling optical flow",
-                            drop_rate * 100,
-                        )
-                    elif flow_auto_disabled and drop_rate <= _DROP_RATE_THRESHOLD * 0.5:
-                        flow_auto_disabled = False
-                        LOGGER.info("Frame drop rate recovered — re-enabling optical flow")
                     profiler.add_sample("frame_drops", frame_drop_count)
                     frame_drop_count = 0
                     frame_total_count = 0
@@ -376,8 +353,6 @@ class InferenceProcess(mp.Process):
                     postprocess_ms = (perf_counter_ns() - postprocess_start_ns) / 1_000_000.0
                     profiler.add_sample("postprocess", int(postprocess_ms * 1_000_000))
 
-                    flow_active = flow_enabled and not flow_auto_disabled
-
                     message, was_lost, current_locked, prev_locked_bbox = pipeline.process_frame(
                         record=record,
                         undistorted=undistorted,
@@ -389,7 +364,6 @@ class InferenceProcess(mp.Process):
                         wait_ms=wait_ms,
                         inference_ms=inference_ms,
                         postprocess_ms=postprocess_ms,
-                        flow_active=flow_active,
                     )
                     prev_locked_id = current_locked
 

@@ -18,7 +18,6 @@ from src.inference.stages.tracker import TrackerStage
 from src.shared.pose_schema import PoseSchema
 from src.shared.types import Detection, TrackingMessage
 from src.tracking.adaptive import AdaptiveController
-from src.tracking.optical_flow import OpticalFlowRefiner
 
 LOGGER = logging.getLogger("inference.pipeline")
 
@@ -26,8 +25,8 @@ LOGGER = logging.getLogger("inference.pipeline")
 class TrackingPipeline:
     """Orchestrates the full per-frame tracking pipeline.
 
-    Composes TrackerStage, CentroidStage, ServoStage, OpitcalFlowRefiner,
-    and AdaptiveController into a single ``process_frame()`` call.
+    Composes TrackerStage, CentroidStage, ServoStage, and AdaptiveController
+    into a single ``process_frame()`` call.
     """
 
     def __init__(
@@ -41,8 +40,6 @@ class TrackingPipeline:
         pose_schema: PoseSchema,
         ema_pixel,
         servo_ema_pixel,
-        flow_refiner: OpticalFlowRefiner,
-        flow_enabled: bool,
         depth_smoother: DepthSmoother | None,
     ) -> None:
         self.tracker_stage = tracker_stage
@@ -53,8 +50,6 @@ class TrackingPipeline:
         self._pose_schema = pose_schema
         self._ema_pixel = ema_pixel
         self._servo_ema_pixel = servo_ema_pixel
-        self._flow_refiner = flow_refiner
-        self._flow_enabled = flow_enabled
         self._depth_smoother = depth_smoother
         self._measurement_update_count = 0
         self._measurement_gated_count = 0
@@ -80,7 +75,6 @@ class TrackingPipeline:
         wait_ms: float,
         inference_ms: float,
         postprocess_ms: float,
-        flow_active: bool,
     ) -> tuple[TrackingMessage, bool, int | None, tuple[float, ...] | None]:
         """Run the full tracking pipeline for one frame.
 
@@ -91,23 +85,6 @@ class TrackingPipeline:
         primary_track, reid_match = ts.select_primary_track(
             tracks, record.frame, record.timestamp_ns, prev_locked_id
         )
-
-        # Optical flow refinement
-        if (
-            flow_active
-            and self._flow_enabled
-            and primary_track is not None
-            and primary_track.lost_frames == 0
-            and primary_track.score < 0.85
-        ):
-            kpts_xy = primary_track.keypoints[:, :2]
-            refined_xy = self._flow_refiner.refine(undistorted, kpts_xy)
-            if primary_track.keypoints.shape[1] > 2:
-                primary_track.keypoints[:, :2] = refined_xy
-            else:
-                primary_track.keypoints = refined_xy
-        else:
-            self._flow_refiner.reset()
 
         current_locked = primary_track.track_id if primary_track is not None else None
         proximity_transfer = ts.consume_proximity_transfer()
@@ -175,8 +152,6 @@ class TrackingPipeline:
                         ts.stabilizer.reset()
                         ts.kalman.reset()
                         self.adaptive.reset()
-                        if flow_active and self._flow_enabled:
-                            self._flow_refiner.reset()
                     LOGGER.info(
                         "Lock transition: %s -> %s (reid=%s, cache=%s)",
                         prev_locked_id,
