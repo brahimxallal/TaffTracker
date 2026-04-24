@@ -23,9 +23,8 @@ from src.output.diagnostics import draw_diagnostics, get_transport_status
 from src.output.manual_control import (
     ManualVelocityTracker,
     boost_manual_velocity,
-    build_manual_packet,
-    rewrite_packet_sequence,
 )
+from src.output.manual_loop import ManualLoopConfig, run_manual_tick_loop
 from src.output.sender_factory import create_sender
 from src.output.telemetry import write_metrics_summary
 from src.output.visualizer import FrameSmoother, draw_overlay
@@ -132,58 +131,33 @@ class OutputProcess(mp.Process):
         send_lock: threading.Lock,
         shutdown_event: mp.synchronize.Event,
     ) -> None:
-        """100 Hz manual packet emitter, decoupled from inference frame rate."""
-        TICK_S = 0.01  # 10 ms = 100 Hz
-        pan_sign = -1.0 if self._gimbal_config.invert_pan else 1.0
-        tilt_sign = -1.0 if self._gimbal_config.invert_tilt else 1.0
-        pan_lim = self._gimbal_config.pan_limit_deg
-        tilt_lim = self._gimbal_config.tilt_limit_deg
-        velocity_tracker = ManualVelocityTracker()
+        """100 Hz manual packet emitter, decoupled from inference frame rate.
 
-        while not shutdown_event.is_set():
-            is_manual = self._manual_mode is not None and bool(self._manual_mode.value)
-            if not is_manual or sender is None:
-                velocity_tracker.reset()
-                time.sleep(TICK_S)
-                continue
+        Thin delegate over :func:`src.output.manual_loop.run_manual_tick_loop`.
+        ``send_lock`` protects the shared ``self._manual_sequence`` counter so
+        the same counter remains consistent across start/restart cycles of
+        this method.
+        """
 
-            manual_pan_deg = float(self._manual_pan.value) if self._manual_pan is not None else 0.0
-            manual_tilt_deg = (
-                float(self._manual_tilt.value) if self._manual_tilt is not None else 0.0
-            )
-            manual_pan_deg = max(-pan_lim, min(pan_lim, manual_pan_deg))
-            manual_tilt_deg = max(-tilt_lim, min(tilt_lim, manual_tilt_deg))
-
-            pan_deg = manual_pan_deg * pan_sign
-            tilt_deg = manual_tilt_deg * tilt_sign
-            now_ns = time.perf_counter_ns()
-
-            pan_vel_dps, tilt_vel_dps = velocity_tracker.compute_velocity_dps(
-                pan_deg, tilt_deg, now_ns
-            )
-            pan_vel_dps = self._boost_manual_velocity(pan_vel_dps)
-            tilt_vel_dps = self._boost_manual_velocity(tilt_vel_dps)
-
-            relay_on = self._relay_flag is not None and bool(self._relay_flag.value)
-            packet = build_manual_packet(
-                pan_deg=pan_deg,
-                tilt_deg=tilt_deg,
-                pan_vel_dps=pan_vel_dps,
-                tilt_vel_dps=tilt_vel_dps,
-                now_ns=now_ns,
-                laser_enabled=self._is_laser_enabled(),
-                relay_on=relay_on,
-            )
-
+        def _get_next_sequence() -> int:
             with send_lock:
                 seq = self._manual_sequence
                 self._manual_sequence = (seq + 1) & 0xFFFF
-            packet = rewrite_packet_sequence(packet, seq)
+            return seq
 
-            if sender.is_connected:
-                sender.send(packet)
-
-            time.sleep(TICK_S)
+        run_manual_tick_loop(
+            sender=sender,
+            shutdown_event=shutdown_event,
+            manual_mode=self._manual_mode,
+            manual_pan=self._manual_pan,
+            manual_tilt=self._manual_tilt,
+            relay_flag=self._relay_flag,
+            laser_enabled=self._laser_enabled,
+            loop_config=ManualLoopConfig.from_configs(
+                self._gimbal_config, self._servo_control_config
+            ),
+            get_next_sequence=_get_next_sequence,
+        )
 
     def run(self) -> None:
         import sys
