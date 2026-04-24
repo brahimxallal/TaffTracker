@@ -87,7 +87,6 @@ class TrackingMessage:
     is_occlusion_recovery: bool = False
     hold_time_s: float | None = None  # adaptive hold time override
     laser_pixel: tuple[float, float] | None = None
-    servo_mode: str = "acquisition"
     other_targets: tuple[tuple[float, float, int, float], ...] = ()  # (cx, cy, track_id, score)
     egomotion_applied_px: tuple[float, float] | None = None
 

@@ -257,19 +257,6 @@ class LaserConfig:
 
 
 @dataclass(frozen=True)
-class VisualServoConfig:
-    enabled: bool = False
-    kp: float = 0.4
-    ki: float = 0.05
-    kd: float = 0.1
-    integral_limit_deg: float = 5.0
-    entry_threshold_frames: int = 5
-    exit_threshold_frames: int = 10
-    association_radius_px: float = 100.0
-    max_correction_deg: float = 45.0
-
-
-@dataclass(frozen=True)
 class PreflightConfig:
     enabled: bool = True
     window_size: int = 60
@@ -322,7 +309,6 @@ class PipelineConfig:
     mount_offset: MountOffsetConfig = field(default_factory=MountOffsetConfig)
     laser: LaserConfig = field(default_factory=LaserConfig)
     laser_boresight: LaserBoresightConfig = field(default_factory=LaserBoresightConfig)
-    visual_servo: VisualServoConfig = field(default_factory=VisualServoConfig)
     preflight: PreflightConfig = field(default_factory=PreflightConfig)
     relay: RelayConfig = field(default_factory=RelayConfig)
     servo_control: ServoControlConfig = field(default_factory=ServoControlConfig)

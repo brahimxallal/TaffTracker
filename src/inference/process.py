@@ -22,7 +22,6 @@ from src.config import (
     RuntimePaths,
     TargetKind,
     TrackingConfig,
-    VisualServoConfig,
 )
 from src.inference.pipeline import TrackingPipeline
 from src.inference.postprocess import (
@@ -42,7 +41,6 @@ from src.tracking.adaptive import AdaptiveController
 from src.tracking.botsort import BoTSORT
 from src.tracking.kalman import KalmanFilter
 from src.tracking.reid import ReIDBuffer
-from src.tracking.visual_servo import VisualServoController
 
 LOGGER = logging.getLogger("inference")
 
@@ -63,7 +61,6 @@ class InferenceProcess(mp.Process):
         model_config: ModelConfig,
         runtime_paths: RuntimePaths,
         laser_config: LaserConfig | None = None,
-        visual_servo_config: VisualServoConfig | None = None,
         mount_offset: MountOffsetConfig | None = None,
         preflight_config: PreflightConfig | None = None,
         profile: bool = False,
@@ -86,7 +83,6 @@ class InferenceProcess(mp.Process):
         self._model_config = model_config
         self._runtime_paths = runtime_paths
         self._laser_config = laser_config
-        self._visual_servo_config = visual_servo_config
         self._mount_offset = mount_offset or MountOffsetConfig()
         self._preflight_config = preflight_config or PreflightConfig()
         self._profile = profile
@@ -169,43 +165,14 @@ class InferenceProcess(mp.Process):
                 mo.z_m,
             )
 
-        # Laser + visual servo
+        # Laser detector (overlay only — no closed-loop PID)
         laser_detector = None
-        servo_controller = None
         if self._laser_config is not None and self._laser_config.enabled:
             from src.laser.detector import LaserDetector
 
             laser_detector = LaserDetector(self._laser_config)
             LOGGER.info(
                 "Laser detector enabled (HSV red, ROI=%.0fpx)", self._laser_config.roi_radius_px
-            )
-
-        vs_cfg = self._visual_servo_config
-        if vs_cfg is not None and vs_cfg.enabled and laser_detector is not None:
-            from math import atan2 as _atan2
-            from math import degrees as _deg
-
-            fx, fy = camera_model.focal_lengths_px
-            dpx = _deg(_atan2(1.0, fx))
-            dpy = _deg(_atan2(1.0, fy))
-            servo_controller = VisualServoController(
-                kp=vs_cfg.kp,
-                ki=vs_cfg.ki,
-                kd=vs_cfg.kd,
-                integral_limit_deg=vs_cfg.integral_limit_deg,
-                max_correction_deg=vs_cfg.max_correction_deg,
-                entry_threshold_frames=vs_cfg.entry_threshold_frames,
-                exit_threshold_frames=vs_cfg.exit_threshold_frames,
-                association_radius_px=vs_cfg.association_radius_px,
-                deg_per_pixel_x=dpx,
-                deg_per_pixel_y=dpy,
-            )
-            LOGGER.info(
-                "Visual servo enabled (kp=%.2f, ki=%.2f, kd=%.2f, dpx=%.4f deg/px)",
-                vs_cfg.kp,
-                vs_cfg.ki,
-                vs_cfg.kd,
-                dpx,
             )
 
         # ── Assemble stages and pipeline ──
@@ -223,7 +190,6 @@ class InferenceProcess(mp.Process):
         )
         servo_stage = ServoStage(
             laser_detector=laser_detector,
-            servo_controller=servo_controller,
             laser_roi_radius=self._laser_config.roi_radius_px if self._laser_config else 150.0,
         )
         pipeline = TrackingPipeline(

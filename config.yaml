@@ -187,18 +187,6 @@ tracking_dog:
     servo_mincutoff: 12.0
     servo_beta: 0.5
 
-# --- Visual Servo (closed-loop laser-guided PID) ---
-visual_servo:
-  enabled: false               # Set true to enable PID closed-loop when laser visible
-  kp: 0.4                     # Proportional gain
-  ki: 0.05                    # Integral gain (zeroes steady-state backlash)
-  kd: 0.1                     # Derivative gain (damps oscillation)
-  integral_limit_deg: 5.0     # Anti-windup integral clamp (degrees)
-  entry_threshold_frames: 5   # Consecutive laser frames before entering VISUAL_SERVO
-  exit_threshold_frames: 10   # Consecutive no-laser frames before falling back to ACQUISITION
-  association_radius_px: 100.0  # Max px distance target↔laser to count as "near"
-  max_correction_deg: 45.0    # Max PID correction from open-loop baseline
-
 # --- Relay (GPIO 6, toggled by 'O' key) ---
 relay:
   pulse_ms: 150           # How long relay stays ON per press (milliseconds)

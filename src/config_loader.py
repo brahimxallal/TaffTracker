@@ -26,7 +26,6 @@ from src.config import (
     RuntimeFlags,
     RuntimePaths,
     ServoControlConfig,
-    VisualServoConfig,
     adapt_tracking_for_fps,
     default_tracking_config,
 )
@@ -341,9 +340,6 @@ def build_config_from_yaml(
     servo_ctrl_cfg = yaml_data.get("servo_control", {})
     servo_control = _overlay_dataclass(ServoControlConfig(), servo_ctrl_cfg)
 
-    vs_cfg = yaml_data.get("visual_servo", {})
-    visual_servo = _overlay_dataclass(VisualServoConfig(), vs_cfg)
-
     pf_cfg = yaml_data.get("preflight", {})
     preflight = _overlay_dataclass(PreflightConfig(), pf_cfg)
 
@@ -363,7 +359,6 @@ def build_config_from_yaml(
         mount_offset=mount_offset,
         laser=laser,
         laser_boresight=laser_boresight,
-        visual_servo=visual_servo,
         preflight=preflight,
         relay=relay,
         servo_control=servo_control,

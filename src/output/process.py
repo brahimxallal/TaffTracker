@@ -451,7 +451,6 @@ class OutputProcess(mp.Process):
             filtered_angles=(0.0, 0.0),
             servo_angles=(0.0, 0.0),
             servo_angular_velocity=(0.0, 0.0),
-            servo_mode="center",
             filtered_velocity=None,
             angular_velocity=None,
         )

@@ -156,12 +156,6 @@ class TestConfigLoader:
         assert config.laser.enabled is False
         assert config.laser.roi_radius_px == 200.0
 
-    def test_visual_servo_config_from_yaml(self):
-        yaml_data = {"visual_servo": {"enabled": True, "kp": 0.5}}
-        config = build_config_from_yaml(yaml_data)
-        assert config.visual_servo.enabled is True
-        assert config.visual_servo.kp == 0.5
-
     def test_launcher_env_uses_real_config_loader(self, tmp_path: Path):
         cfg = tmp_path / "config.yaml"
         cfg.write_text(

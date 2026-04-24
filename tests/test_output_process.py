@@ -428,16 +428,6 @@ def test_center_message_zeros_servo_velocity() -> None:
     assert result.servo_angular_velocity == (0.0, 0.0)
 
 
-@pytest.mark.unit
-def test_center_message_sets_servo_mode_center() -> None:
-    proc = _make_proc(width=640, height=480)
-    msg = _make_message(servo_mode="acquisition")
-
-    result = proc._center_message(msg)
-
-    assert result.servo_mode == "center"
-
-
 # --- FLAG_LASER_ON conditional tests ---
 
 

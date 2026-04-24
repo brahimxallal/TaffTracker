@@ -323,8 +323,8 @@ class TrackingPipeline:
                 angular_velocity = None
                 servo_angular_velocity = None
 
-        # Laser + visual servo
-        laser_pixel, servo_angles, servo_mode = self.servo_stage.process(
+        # Laser overlay (open-loop only — visual-servo PID removed)
+        laser_pixel, servo_angles = self.servo_stage.process(
             frame,
             filtered_pixel,
             servo_angles,
@@ -371,7 +371,6 @@ class TrackingPipeline:
             postprocess_ms=postprocess_ms,
             is_occlusion_recovery=is_occlusion_recovery,
             laser_pixel=laser_pixel,
-            servo_mode=servo_mode,
             other_targets=other_targets,
             egomotion_applied_px=egomotion_applied_px,
         )

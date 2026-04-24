@@ -253,7 +253,6 @@ def main() -> None:
             config.models,
             config.paths,
             config.laser,
-            visual_servo_config=config.visual_servo,
             mount_offset=config.mount_offset,
             preflight_config=config.preflight,
             profile=config.flags.profile,
