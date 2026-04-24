@@ -19,6 +19,11 @@ from src.config import (
     ServoControlConfig,
     TrackingConfig,
 )
+from src.output.auto_controller import (
+    AutoControllerConfig,
+    AutoControllerState,
+    compute_auto_command,
+)
 from src.output.diagnostics import draw_diagnostics, get_transport_status
 from src.output.manual_control import (
     ManualVelocityTracker,
@@ -93,16 +98,34 @@ class OutputProcess(mp.Process):
         self._frames_processed = 0
         self._last_log_time = time.perf_counter()
         self._center_pixel = (camera_config.width / 2.0, camera_config.height / 2.0)
-        # PID controller state for camera-on-gimbal
-        self._pi_integral_pan = 0.0
-        self._pi_integral_tilt = 0.0
-        self._prev_err_pan = 0.0
-        self._prev_err_tilt = 0.0
-        self._prev_d_pan = 0.0
-        self._prev_d_tilt = 0.0
-        self._last_encode_ts_ns: int | None = None
+        # Auto-mode controller state lives in a dedicated dataclass so
+        # the integrator + derivative history can be unit-tested as a
+        # plain step function (see src/output/auto_controller.py).
+        self._auto_controller_state = AutoControllerState()
+        self._auto_controller_config = AutoControllerConfig.from_configs(
+            self._gimbal_config, self._servo_control_config
+        )
         # Manual-mode velocity history is owned by ManualVelocityTracker.
         self._manual_velocity_tracker = ManualVelocityTracker()
+
+    # --- Backward-compat properties for existing tests that reach into
+    # the per-frame controller state. New code should use
+    # self._auto_controller_state directly.
+    @property
+    def _pi_integral_pan(self) -> float:
+        return self._auto_controller_state.pi_integral_pan
+
+    @_pi_integral_pan.setter
+    def _pi_integral_pan(self, value: float) -> None:
+        self._auto_controller_state.pi_integral_pan = value
+
+    @property
+    def _pi_integral_tilt(self) -> float:
+        return self._auto_controller_state.pi_integral_tilt
+
+    @_pi_integral_tilt.setter
+    def _pi_integral_tilt(self, value: float) -> None:
+        self._auto_controller_state.pi_integral_tilt = value
 
     def _read_laser_boresight_pan(self) -> float:
         if self._laser_boresight_pan is None:
@@ -457,11 +480,7 @@ class OutputProcess(mp.Process):
             )
             pan_vel_dps = self._boost_manual_velocity(pan_vel_dps)
             tilt_vel_dps = self._boost_manual_velocity(tilt_vel_dps)
-            self._pi_integral_pan = 0.0
-            self._pi_integral_tilt = 0.0
-            self._prev_err_pan = 0.0
-            self._prev_err_tilt = 0.0
-            self._last_encode_ts_ns = None
+            self._auto_controller_state.reset()
             confidence_value = 0.0
             vel_mag_dps = (pan_vel_dps * pan_vel_dps + tilt_vel_dps * tilt_vel_dps) ** 0.5
             state = build_state_flags(
@@ -476,116 +495,11 @@ class OutputProcess(mp.Process):
             tilt_vel_cdps = int(round(tilt_vel_dps * 100.0))
         elif not is_manual:
             self._reset_manual_command_history()
-            # Critically-damped incremental controller for camera-on-gimbal.
-            damping_gain = self._gimbal_config.kd
-            slew_limit = self._gimbal_config.slew_limit_dps
-            decay_rate = self._gimbal_config.integral_decay_rate
-            tilt_scale = self._gimbal_config.tilt_scale
-            deadband = self._gimbal_config.deadband_deg
-
-            # Step 7 — Predictive lead: add velocity × lead_time to error
-            angles_rad = message.servo_angles or message.filtered_angles or (0.0, 0.0)
-            vel_rad = message.servo_angular_velocity or message.angular_velocity or (0.0, 0.0)
-            lead_s = self._gimbal_config.predictive_lead_s
-            speed_dps = (degrees(vel_rad[0]) ** 2 + degrees(vel_rad[1]) ** 2) ** 0.5
-            lead = lead_s if speed_dps > 30.0 else 0.0
-            pan_err_deg = (degrees(angles_rad[0]) + degrees(vel_rad[0]) * lead) * pan_sign
-            tilt_err_deg = (degrees(angles_rad[1]) + degrees(vel_rad[1]) * lead) * tilt_sign
-
-            # Compute dt from message timestamps
-            dt = 1.0 / max(message.fps, 1.0) if message.fps > 0 else 1.0 / 60.0
-            if (
-                self._last_encode_ts_ns is not None
-                and message.timestamp_ns > self._last_encode_ts_ns
-            ):
-                dt = (message.timestamp_ns - self._last_encode_ts_ns) / 1e9
-                dt = min(dt, 0.1)
-            self._last_encode_ts_ns = message.timestamp_ns
-
-            if message.target_acquired:
-                pan_abs = abs(pan_err_deg)
-                tilt_abs = abs(tilt_err_deg)
-
-                # Step 6 — Gain schedule: aggressive far, gentle near
-                thr = self._gimbal_config.gain_schedule_threshold_deg
-                kp_pan = (
-                    self._gimbal_config.effective_kp_far
-                    if pan_abs > thr
-                    else self._gimbal_config.effective_kp_near
-                )
-                kp_tilt = (
-                    self._gimbal_config.effective_kp_far
-                    if tilt_abs > thr
-                    else self._gimbal_config.effective_kp_near
-                )
-
-                # Step 5 — Velocity feedforward
-                ff_gain = self._gimbal_config.velocity_feedforward_gain
-                ang_vel = message.servo_angular_velocity or message.angular_velocity or (0.0, 0.0)
-                ff_pan = ff_gain * degrees(ang_vel[0]) * pan_sign
-                ff_tilt = ff_gain * degrees(ang_vel[1]) * tilt_sign
-
-                # Approach rate (°/s) + feedforward, zero inside deadband
-                rate_pan = (kp_pan * pan_err_deg + ff_pan) if pan_abs >= deadband else 0.0
-                rate_tilt = (
-                    (kp_tilt * tilt_scale * tilt_err_deg + ff_tilt) if tilt_abs >= deadband else 0.0
-                )
-
-                # Derivative damping from LP-filtered error finite-difference.
-                if dt > 0:
-                    raw_d_pan = (pan_err_deg - self._prev_err_pan) / dt
-                    raw_d_tilt = (tilt_err_deg - self._prev_err_tilt) / dt
-                    a = self._servo_control_config.derivative_filter_alpha
-                    d_err_pan = a * raw_d_pan + (1.0 - a) * self._prev_d_pan
-                    d_err_tilt = a * raw_d_tilt + (1.0 - a) * self._prev_d_tilt
-                    self._prev_d_pan = d_err_pan
-                    self._prev_d_tilt = d_err_tilt
-                else:
-                    d_err_pan = 0.0
-                    d_err_tilt = 0.0
-                rate_pan += damping_gain * d_err_pan
-                rate_tilt += damping_gain * tilt_scale * d_err_tilt
-
-                self._prev_err_pan = pan_err_deg
-                self._prev_err_tilt = tilt_err_deg
-
-                # Step 9 — Distance-scaled slew: larger error → higher slew cap
-                slew_floor = slew_limit * 0.25
-                slew_pan = min(slew_limit, max(slew_floor, pan_abs * 6.0))
-                slew_tilt = min(slew_limit, max(slew_floor, tilt_abs * 6.0))
-                rate_pan = max(-slew_pan, min(slew_pan, rate_pan))
-                rate_tilt = max(-slew_tilt, min(slew_tilt, rate_tilt))
-
-                # Accumulate commanded position
-                self._pi_integral_pan += rate_pan * dt
-                self._pi_integral_tilt += rate_tilt * dt
-
-                # Integral decay inside deadband: bleed accumulated command
-                # toward zero when error is small (prevents residual drift)
-                if pan_abs < deadband and decay_rate > 0 and dt > 0:
-                    decay = max(0.0, 1.0 - decay_rate * dt)
-                    self._pi_integral_pan *= decay
-                if tilt_abs < deadband and decay_rate > 0 and dt > 0:
-                    decay = max(0.0, 1.0 - decay_rate * dt)
-                    self._pi_integral_tilt *= decay
-
-                # Clamp to servo limits
-                self._pi_integral_pan = max(-pan_lim, min(pan_lim, self._pi_integral_pan))
-                self._pi_integral_tilt = max(-tilt_lim, min(tilt_lim, self._pi_integral_tilt))
-
-                pan_deg = self._pi_integral_pan
-                tilt_deg = self._pi_integral_tilt
-            elif message.state_source == "center":
-                self._pi_integral_pan = 0.0
-                self._pi_integral_tilt = 0.0
-                self._prev_err_pan = 0.0
-                self._prev_err_tilt = 0.0
-                pan_deg = 0.0
-                tilt_deg = 0.0
-            else:
-                # Prediction/hold: maintain current commanded position
-                pan_deg = self._pi_integral_pan
-                tilt_deg = self._pi_integral_tilt
+            pan_deg, tilt_deg = compute_auto_command(
+                message=message,
+                state=self._auto_controller_state,
+                config=self._auto_controller_config,
+            )
 
         # Laser boresight offset: physical angular offset between the laser
         # emitter and the camera lens. Applied to auto-tracking commands only —
