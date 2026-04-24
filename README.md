@@ -31,6 +31,7 @@ python -m src.main --mode camera --target human --source 0
 ```
 
 Full setup (TRT export, firmware flash, calibration): [docs/INSTALL.md](docs/INSTALL.md).
+System overview and pipeline walkthrough: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Project layout
 
