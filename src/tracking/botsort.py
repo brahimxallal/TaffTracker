@@ -41,6 +41,7 @@ class BoTSORT(ByteTracker):
         cmc_ransac_threshold: float = 3.0,
         cmc_downscale: float = 0.25,
         cmc_feature_reuse_frames: int = 5,
+        cmc_max_translation_px: float = 100.0,
     ) -> None:
         super().__init__(
             track_thresh=track_thresh,
@@ -56,6 +57,12 @@ class BoTSORT(ByteTracker):
         self._cmc_ransac_threshold = cmc_ransac_threshold
         self._cmc_downscale = cmc_downscale
         self._cmc_feature_reuse_frames = max(1, cmc_feature_reuse_frames)
+        # Safety clamp: reject the estimated warp if either translation component
+        # exceeds this magnitude in full-resolution pixels. Protects against
+        # runaway shifts when optical flow is fooled by repetitive textures or
+        # sudden lighting changes. 100 px @ 640 wide frame ≈ 15% of FOV —
+        # well beyond plausible single-frame egomotion at 60 FPS.
+        self._cmc_max_translation_px = max(0.0, float(cmc_max_translation_px))
         self._prev_gray: np.ndarray | None = None
         self._prev_pts: np.ndarray | None = None
         self._frames_since_feature_extract: int = 0
@@ -161,6 +168,15 @@ class BoTSORT(ByteTracker):
             inv_scale = 1.0 / scale
             warp[0, 2] *= inv_scale
             warp[1, 2] *= inv_scale
+
+        # Safety clamp: reject implausibly large translations. A bogus warp
+        # (e.g. from flashing lights, glass reflections, or flat-texture
+        # regions) can drag every track across the frame in one step. Better
+        # to skip compensation entirely than to apply a bad warp.
+        if self._cmc_max_translation_px > 0.0:
+            tx, ty = float(warp[0, 2]), float(warp[1, 2])
+            if abs(tx) > self._cmc_max_translation_px or abs(ty) > self._cmc_max_translation_px:
+                return None
         return warp
 
     def _warp_tracks(self, warp: np.ndarray) -> None:
