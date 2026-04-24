@@ -246,6 +246,10 @@ class PreflightConfig:
     brightness_stddev_warn: float = 18.0
     sharpness_drop_warn: float = 0.4
     warn_cooldown_s: float = 10.0
+    # Every N processed frames, the inference loop flushes a rolling
+    # "frame_drops" sample into the profiler. Larger values mean less
+    # profiler chatter; smaller values mean tighter drop-rate telemetry.
+    frame_drop_sample_window: int = 120
 
 
 @dataclass(frozen=True)

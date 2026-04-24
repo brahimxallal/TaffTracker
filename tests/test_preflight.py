@@ -142,3 +142,21 @@ def test_insufficient_data_no_warnings() -> None:
         frame = _constant_frame(50 + i * 10)
         warnings = monitor.check(frame)
         assert warnings == []
+
+
+@pytest.mark.unit
+def test_frame_drop_sample_window_has_sane_default() -> None:
+    """The inference loop flushes a drop-rate sample every N frames.
+
+    120 frames @ 60 fps ≈ 2 s — fine-grained enough to see sustained drops
+    but coarse enough that a single hiccup doesn't spam the profiler.
+    """
+    config = PreflightConfig()
+    assert config.frame_drop_sample_window == 120
+
+
+@pytest.mark.unit
+def test_frame_drop_sample_window_is_tunable() -> None:
+    """The knob must be overridable so ops can widen or tighten the window."""
+    config = PreflightConfig(frame_drop_sample_window=600)
+    assert config.frame_drop_sample_window == 600

@@ -205,7 +205,7 @@ class InferenceProcess(mp.Process):
         frame_total_count = 0
         frames_since_gc = 0
         # Rolling drop-rate telemetry: flushes every _DROP_WINDOW frames.
-        _DROP_WINDOW = 120
+        _DROP_WINDOW = max(1, int(self._preflight_config.frame_drop_sample_window))
         _FRAME_TIMEOUT_NS = int(3.0 / max(self._camera_config.fps, 1) * 1_000_000_000)
         _last_frame_received_ns = perf_counter_ns()
 

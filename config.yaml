@@ -189,3 +189,4 @@ preflight:
   brightness_stddev_warn: 18.0    # Brightness stddev above this → AE hunting warning
   sharpness_drop_warn: 0.65       # MJPEG compression causes ~50% variation; raised from 0.4
   warn_cooldown_s: 30.0           # Debounce repeated warnings (seconds)
+  frame_drop_sample_window: 120   # Inference flushes a drop-rate sample every N frames
