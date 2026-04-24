@@ -23,6 +23,7 @@ from src.shared.display_buffer import SharedDisplayBuffer
 from src.shared.ring_buffer import SharedRingBuffer
 from src.shared.types import ProcessErrorReport
 from src.ui.hotkeys import is_quit_hotkey
+from src.ui.manual_keyboard import ManualKeyboardConfig, ManualKeyboardDriver
 from src.ui.overlays import draw_help_overlay, draw_laser_cal_hud
 
 # Re-export for tests/backwards compatibility: ``from src.main import validate_environment``
@@ -205,9 +206,13 @@ def main() -> None:
     manual_mode = mp.Value("b", 0)  # 0=auto, 1=manual
     manual_pan = mp.Value("d", 0.0)  # absolute pan angle (degrees)
     manual_tilt = mp.Value("d", 0.0)  # absolute tilt angle (degrees)
-    manual_last_time: float = time.perf_counter()
-    _manual_vel_pan: float = 0.0
-    _manual_vel_tilt: float = 0.0
+    manual_keyboard = ManualKeyboardDriver(
+        ManualKeyboardConfig(
+            fine_speed_dps=MANUAL_FINE_SPEED_DPS,
+            coarse_speed_dps=MANUAL_COARSE_SPEED_DPS,
+            accel_time_s=MANUAL_ACCEL_TIME,
+        )
+    )
 
     # Laser boresight offset (live-updated by interactive calibrator, read by OutputProcess)
     laser_boresight_pan = mp.Value("d", float(config.laser_boresight.pan_offset_deg))
@@ -413,64 +418,20 @@ def main() -> None:
                             manual_pan.value,
                             manual_tilt.value,
                         )
-                    manual_last_time = time.perf_counter()
+                    manual_keyboard.reset_clock()
 
                 # Manual gimbal movement — diagonal + acceleration ramping
                 if manual_mode.value:
-                    now = time.perf_counter()
-                    dt = min(now - manual_last_time, 0.1)
-                    manual_last_time = now
-                    pan_lim = config.gimbal.pan_limit_deg
-                    tilt_lim = config.gimbal.tilt_limit_deg
-                    speed_fine = MANUAL_FINE_SPEED_DPS
-                    speed_coarse = MANUAL_COARSE_SPEED_DPS
-
-                    # Determine requested pan/tilt velocity from keys
-                    req_pan = 0.0
-                    req_tilt = 0.0
-                    if key_low == ord("q"):
-                        req_pan = -speed_fine
-                    elif key_low == ord("d"):
-                        req_pan = speed_fine
-                    elif key_low == ord("z"):
-                        req_tilt = -speed_fine
-                    elif key_low == ord("s"):
-                        req_tilt = speed_fine
-                    # Arrow keys (can combine with ZQSD for diagonal)
-                    if key == 0x250000:
-                        req_pan = -speed_coarse
-                    elif key == 0x270000:
-                        req_pan = speed_coarse
-                    if key == 0x260000:
-                        req_tilt = -speed_coarse
-                    elif key == 0x280000:
-                        req_tilt = speed_coarse
-
-                    # Smooth acceleration ramp
-                    ramp_rate = dt / MANUAL_ACCEL_TIME if MANUAL_ACCEL_TIME > 0 else 1.0
-                    if req_pan != 0.0:
-                        _manual_vel_pan += (req_pan - _manual_vel_pan) * min(1.0, ramp_rate)
-                    else:
-                        _manual_vel_pan *= max(0.0, 1.0 - ramp_rate * 3)  # fast decel
-                    if req_tilt != 0.0:
-                        _manual_vel_tilt += (req_tilt - _manual_vel_tilt) * min(1.0, ramp_rate)
-                    else:
-                        _manual_vel_tilt *= max(0.0, 1.0 - ramp_rate * 3)
-
-                    moved = abs(_manual_vel_pan) > 0.05 or abs(_manual_vel_tilt) > 0.05
-                    if moved:
-                        manual_pan.value = max(
-                            -pan_lim, min(pan_lim, manual_pan.value + _manual_vel_pan * dt)
-                        )
-                        manual_tilt.value = max(
-                            -tilt_lim, min(tilt_lim, manual_tilt.value + _manual_vel_tilt * dt)
-                        )
-                    else:
-                        _manual_vel_pan = 0.0
-                        _manual_vel_tilt = 0.0
-                        manual_last_time = now
+                    manual_keyboard.tick(
+                        key=key,
+                        key_low=key_low,
+                        manual_pan=manual_pan,
+                        manual_tilt=manual_tilt,
+                        pan_limit_deg=config.gimbal.pan_limit_deg,
+                        tilt_limit_deg=config.gimbal.tilt_limit_deg,
+                    )
                 else:
-                    manual_last_time = time.perf_counter()
+                    manual_keyboard.reset_clock()
 
                 # Auto-off relay after pulse duration
                 if relay_flag.value and time.perf_counter() >= relay_off_time:
