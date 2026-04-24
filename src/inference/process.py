@@ -21,6 +21,12 @@ from src.config import (
     TargetKind,
     TrackingConfig,
 )
+from src.inference.bootstrap import (
+    compute_dt,
+    load_camera_model,
+    load_pose_schema,
+    resolve_engine_path,
+)
 from src.inference.pipeline import TrackingPipeline
 from src.inference.postprocess import (
     KeypointStabilizer,
@@ -31,7 +37,7 @@ from src.inference.stages.servo import ServoStage
 from src.inference.stages.tracker import TrackerStage
 from src.inference.telemetry import format_profiler_summary, write_profiler_summary
 from src.inference.trt_engine import TRTEngine
-from src.shared.pose_schema import PoseSchema, get_pose_schema
+from src.shared.pose_schema import PoseSchema
 from src.shared.profiler import StageProfiler
 from src.shared.ring_buffer import RingBufferLayout, SharedRingBuffer
 from src.shared.types import ProcessErrorReport, TrackingMessage
@@ -339,62 +345,16 @@ class InferenceProcess(mp.Process):
     # ── Helpers (kept in process shell) ──
 
     def _resolve_engine_path(self):
-        return (
-            self._model_config.person_engine_path
-            if self._target == "human"
-            else self._model_config.dog_engine_path
-        )
+        return resolve_engine_path(self._target, self._model_config)
 
     def _load_camera_model(self) -> CameraModel:
-        calibration_path = self._runtime_paths.calibration_file_path()
-        if calibration_path.exists():
-            try:
-                model = CameraModel.load(calibration_path)
-            except Exception as exc:
-                LOGGER.warning(
-                    "Failed to load camera calibration from %s: %s",
-                    calibration_path,
-                    exc,
-                )
-            else:
-                if model.image_size == (self._camera_config.width, self._camera_config.height):
-                    LOGGER.info("Using camera calibration from %s", calibration_path)
-                    return model
-                LOGGER.warning(
-                    "Calibration image size %s does not match runtime size (%d, %d); falling back",
-                    model.image_size,
-                    self._camera_config.width,
-                    self._camera_config.height,
-                )
-        if self._camera_config.fov is not None:
-            LOGGER.info("Using configured FOV %.1f deg", self._camera_config.fov)
-            return CameraModel.from_fov(
-                self._camera_config.fov, self._camera_config.width, self._camera_config.height
-            )
-        if self._mode == "camera":
-            raise ValueError(
-                "camera.fov must be set or calibration_data/intrinsics.npz must exist for camera mode"
-            )
-        LOGGER.warning("No FOV configured, falling back to identity camera model")
-        return CameraModel.identity(self._camera_config.width, self._camera_config.height)
+        return load_camera_model(self._mode, self._camera_config, self._runtime_paths, LOGGER)
 
     def _load_pose_schema(self) -> PoseSchema:
-        schema_path = (
-            self._runtime_paths.resolved_dog_pose_schema_path() if self._target == "dog" else None
-        )
-        pose_schema = get_pose_schema(self._target, schema_path)
-        LOGGER.info(
-            "Using %s pose schema from %s with %s keypoints",
-            pose_schema.target_kind,
-            pose_schema.source,
-            pose_schema.keypoint_count,
-        )
-        return pose_schema
+        return load_pose_schema(self._target, self._runtime_paths, LOGGER)
 
     def _compute_dt(self, current_timestamp_ns: int, last_timestamp_ns: int | None) -> float:
-        if last_timestamp_ns is None:
-            return 1.0 / max(self._camera_config.fps, 1)
-        return max((current_timestamp_ns - last_timestamp_ns) / 1_000_000_000.0, 1e-3)
+        return compute_dt(current_timestamp_ns, last_timestamp_ns, self._camera_config.fps)
 
     def _publish(self, message: TrackingMessage | None) -> None:
         try:
