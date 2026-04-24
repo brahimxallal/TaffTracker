@@ -195,23 +195,6 @@ class RuntimePaths:
 
 
 @dataclass(frozen=True)
-class MountOffsetConfig:
-    """Camera-to-gimbal physical offset in meters (camera coordinate frame).
-
-    Measured from the camera lens to the gimbal pivot point.
-    +X = gimbal is to the RIGHT of the camera
-    +Y = gimbal is BELOW the camera
-    +Z = gimbal is in FRONT of (further from wall than) the camera
-    """
-
-    x_m: float = 0.0
-    y_m: float = 0.0
-    z_m: float = 0.0
-    depth_ema_alpha: float = 0.3  # Temporal smoothing for depth estimates
-    depth_stale_frames: int = 60  # Frames before depth estimate expires
-
-
-@dataclass(frozen=True)
 class GimbalConfig:
     invert_pan: bool = False
     invert_tilt: bool = False
@@ -306,7 +289,6 @@ class PipelineConfig:
     paths: RuntimePaths = field(default_factory=RuntimePaths)
     flags: RuntimeFlags = field(default_factory=RuntimeFlags)
     gimbal: GimbalConfig = field(default_factory=GimbalConfig)
-    mount_offset: MountOffsetConfig = field(default_factory=MountOffsetConfig)
     laser: LaserConfig = field(default_factory=LaserConfig)
     laser_boresight: LaserBoresightConfig = field(default_factory=LaserBoresightConfig)
     preflight: PreflightConfig = field(default_factory=PreflightConfig)

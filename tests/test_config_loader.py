@@ -186,12 +186,6 @@ class TestConfigLoader:
         assert env["CFG_COMM_DETAIL"] == "10.0.0.7:7000"
         assert "CFG_CAMERA_MOUNT" not in env
 
-    def test_mount_offset_from_yaml(self):
-        yaml_data = {"mount_offset": {"x_m": 0.1, "y_m": -0.05}}
-        config = build_config_from_yaml(yaml_data)
-        assert config.mount_offset.x_m == 0.1
-        assert config.mount_offset.y_m == -0.05
-
     def test_legacy_ground_plane_yaml_is_ignored(self):
         config = build_config_from_yaml({"ground_plane": {"enabled": True}})
         assert not hasattr(config, "ground_plane")

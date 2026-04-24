@@ -131,12 +131,10 @@ def test_compute_dt_clamps_minimum() -> None:
 @pytest.mark.unit
 def test_update_commanded_camera_motion_tracks_shared_command_velocity() -> None:
     from src.calibration.camera_model import CameraModel
-    from src.config import MountOffsetConfig
     from src.inference.stages.centroid import CentroidStage
 
     stage = CentroidStage(
         camera_model=CameraModel.from_fov(72.0, 640, 640),
-        mount_offset=MountOffsetConfig(),
         target="human",
     )
     command_pan = mp.Value("d", 0.0)

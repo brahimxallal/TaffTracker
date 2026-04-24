@@ -50,15 +50,6 @@ gimbal:
   gain_schedule_threshold_deg: 3.0
   predictive_lead_s: 0.08  # Velocity lead time (s); 0 = disabled
 
-# --- Mount Offset (camera lens to gimbal pivot) ---
-# Keep zero when the lens is effectively on-axis with the pivot.
-# Use small non-zero values only if close-range parallax is measurable.
-mount_offset:
-  x_m: 0.0
-  y_m: 0.0
-  z_m: 0.0
-  depth_ema_alpha: 0.3
-  depth_stale_frames: 60
 
 # --- Models ---
 models:

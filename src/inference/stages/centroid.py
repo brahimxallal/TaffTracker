@@ -3,11 +3,8 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 
-import numpy as np
-
 from src.calibration.camera_model import CameraModel
-from src.calibration.depth_estimator import DepthSmoother, estimate_depth
-from src.config import MountOffsetConfig, TargetKind
+from src.config import TargetKind
 
 LOGGER = logging.getLogger("inference.centroid")
 
@@ -19,16 +16,20 @@ class EgomotionCompensation:
 
 
 class CentroidStage:
-    """Centroid computation, egomotion compensation, depth estimation, and angle conversion."""
+    """Egomotion compensation and pixel→angle conversion.
+
+    Depth-based parallax correction has been removed — the camera is
+    assumed to be effectively on-axis with the gimbal pivot (measured
+    parallax was negligible on this rig). Angles are produced directly
+    from the pinhole pixel→angle mapping.
+    """
 
     def __init__(
         self,
         camera_model: CameraModel,
-        mount_offset: MountOffsetConfig,
         target: TargetKind,
     ) -> None:
         self._camera_model = camera_model
-        self._mount_offset = mount_offset
         self._target = target
         self._last_camera_angular_velocity: tuple[float, float] | None = None
         self._last_camera_angular_velocity_timestamp_ns: int | None = None
@@ -112,40 +113,10 @@ class CentroidStage:
         self._last_command_tilt_rad = tilt_rad
         self._last_command_timestamp_ns = timestamp_ns
 
-    def update_depth(
-        self,
-        keypoints: np.ndarray | None,
-        depth_smoother: DepthSmoother | None,
-        bbox: np.ndarray | None = None,
-    ) -> float | None:
-        if depth_smoother is None:
-            return None
-        raw_depth = None
-        result = estimate_depth(
-            keypoints,
-            self._camera_model.focal_length_px,
-            bbox=bbox,
-            target_kind=self._target,
-        )
-        if result is not None:
-            raw_depth = result.depth_m
-        return depth_smoother.update(raw_depth)
-
     def compute_angles(
         self,
         pixel: tuple[float, float],
-        depth_m: float | None,
     ) -> tuple[float, float]:
-        mo = self._mount_offset
-        if depth_m is not None and (mo.x_m != 0.0 or mo.y_m != 0.0 or mo.z_m != 0.0):
-            return self._camera_model.pixel_to_angle_with_parallax(
-                pixel[0],
-                pixel[1],
-                depth_m,
-                mo.x_m,
-                mo.y_m,
-                mo.z_m,
-            )
         return self._camera_model.pixel_to_angle(*pixel)
 
     def compute_angular_velocity(

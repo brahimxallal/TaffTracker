@@ -11,13 +11,11 @@ from time import perf_counter_ns
 from traceback import format_exc
 
 from src.calibration.camera_model import CameraModel
-from src.calibration.depth_estimator import DepthSmoother
 from src.config import (
     CameraConfig,
     LaserConfig,
     Mode,
     ModelConfig,
-    MountOffsetConfig,
     PreflightConfig,
     RuntimePaths,
     TargetKind,
@@ -61,7 +59,6 @@ class InferenceProcess(mp.Process):
         model_config: ModelConfig,
         runtime_paths: RuntimePaths,
         laser_config: LaserConfig | None = None,
-        mount_offset: MountOffsetConfig | None = None,
         preflight_config: PreflightConfig | None = None,
         profile: bool = False,
         relock_event: mp.synchronize.Event | None = None,
@@ -83,7 +80,6 @@ class InferenceProcess(mp.Process):
         self._model_config = model_config
         self._runtime_paths = runtime_paths
         self._laser_config = laser_config
-        self._mount_offset = mount_offset or MountOffsetConfig()
         self._preflight_config = preflight_config or PreflightConfig()
         self._profile = profile
         self._relock_event = relock_event
@@ -149,22 +145,6 @@ class InferenceProcess(mp.Process):
             mincutoff=sm.servo_mincutoff, beta=sm.servo_beta, dcutoff=sm.dcutoff
         )
 
-        # Parallax compensation
-        mo = self._mount_offset
-        parallax_active = mo.x_m != 0.0 or mo.y_m != 0.0 or mo.z_m != 0.0
-        depth_smoother = (
-            DepthSmoother(alpha=mo.depth_ema_alpha, max_stale_frames=mo.depth_stale_frames)
-            if parallax_active
-            else None
-        )
-        if parallax_active:
-            LOGGER.info(
-                "Parallax correction enabled: offset=(%.3f, %.3f, %.3f)m",
-                mo.x_m,
-                mo.y_m,
-                mo.z_m,
-            )
-
         # Laser detector (overlay only — no closed-loop PID)
         laser_detector = None
         if self._laser_config is not None and self._laser_config.enabled:
@@ -185,7 +165,6 @@ class InferenceProcess(mp.Process):
         )
         centroid_stage = CentroidStage(
             camera_model=camera_model,
-            mount_offset=self._mount_offset,
             target=self._target,
         )
         servo_stage = ServoStage(
@@ -201,7 +180,6 @@ class InferenceProcess(mp.Process):
             pose_schema=pose_schema,
             ema_pixel=ema_pixel,
             servo_ema_pixel=servo_ema_pixel,
-            depth_smoother=depth_smoother,
         )
 
         # ── Loop state ──

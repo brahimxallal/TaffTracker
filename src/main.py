@@ -253,7 +253,6 @@ def main() -> None:
             config.models,
             config.paths,
             config.laser,
-            mount_offset=config.mount_offset,
             preflight_config=config.preflight,
             profile=config.flags.profile,
             relock_event=relock_event,

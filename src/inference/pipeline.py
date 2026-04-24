@@ -7,7 +7,6 @@ from time import perf_counter_ns
 
 import numpy as np
 
-from src.calibration.depth_estimator import DepthSmoother
 from src.config import TrackingConfig
 from src.inference.postprocess import (
     compute_stabilized_centroid,
@@ -40,7 +39,6 @@ class TrackingPipeline:
         pose_schema: PoseSchema,
         ema_pixel,
         servo_ema_pixel,
-        depth_smoother: DepthSmoother | None,
     ) -> None:
         self.tracker_stage = tracker_stage
         self.centroid_stage = centroid_stage
@@ -50,7 +48,6 @@ class TrackingPipeline:
         self._pose_schema = pose_schema
         self._ema_pixel = ema_pixel
         self._servo_ema_pixel = servo_ema_pixel
-        self._depth_smoother = depth_smoother
         self._measurement_update_count = 0
         self._measurement_gated_count = 0
 
@@ -266,15 +263,9 @@ class TrackingPipeline:
             ts.last_locked_velocity = filtered_velocity
             ts.last_locked_timestamp_ns = record.timestamp_ns
 
-            depth_m = cs.update_depth(
-                primary_track.keypoints,
-                self._depth_smoother,
-                bbox=primary_track.bbox,
-            )
-
             current_time_s = record.timestamp_ns / 1e9
             servo_filtered_pixel = self._servo_ema_pixel(filtered_pixel, current_time_s)
-            servo_angles = cs.compute_angles(servo_filtered_pixel, depth_m)
+            servo_angles = cs.compute_angles(servo_filtered_pixel)
             servo_angular_velocity = cs.compute_angular_velocity(
                 servo_filtered_pixel,
                 filtered_state.vx if filtered_state is not None else 0.0,
@@ -283,7 +274,7 @@ class TrackingPipeline:
 
             filtered_pixel = self._ema_pixel(filtered_pixel, current_time_s)
             raw_angles = cs.camera_model.pixel_to_angle(*raw_pixel)
-            filtered_angles = cs.compute_angles(filtered_pixel, depth_m)
+            filtered_angles = cs.compute_angles(filtered_pixel)
             angular_velocity = cs.compute_angular_velocity(
                 filtered_pixel,
                 self._ema_pixel.dx,
@@ -300,9 +291,8 @@ class TrackingPipeline:
             raw_pixel = None
             filtered_pixel = predicted.position if predicted is not None else None
             raw_angles = None
-            depth_m = cs.update_depth(None, self._depth_smoother)
             filtered_angles = (
-                cs.compute_angles(filtered_pixel, depth_m) if filtered_pixel is not None else None
+                cs.compute_angles(filtered_pixel) if filtered_pixel is not None else None
             )
             servo_angles = filtered_angles
             state_source = "prediction" if predicted is not None else "lost"

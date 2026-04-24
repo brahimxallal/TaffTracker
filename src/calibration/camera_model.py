@@ -94,36 +94,6 @@ class CameraModel:
         cy = float(self._calibration.camera_matrix[1, 2])
         return atan2(px - cx, fx), atan2(py - cy, fy)
 
-    def pixel_to_angle_with_parallax(
-        self,
-        px: float,
-        py: float,
-        depth_m: float,
-        offset_x: float,
-        offset_y: float,
-        offset_z: float,
-    ) -> tuple[float, float]:
-        """Compute gimbal angles corrected for camera-to-gimbal physical offset.
-
-        Projects the pixel into 3D at the estimated depth, then re-projects
-        from the gimbal pivot position to get parallax-corrected aim angles.
-        """
-        fx, fy = self.focal_lengths_px
-        cx = float(self._calibration.camera_matrix[0, 2])
-        cy = float(self._calibration.camera_matrix[1, 2])
-        # Target position in camera frame (meters)
-        x_cam = depth_m * (px - cx) / fx
-        y_cam = depth_m * (py - cy) / fy
-        z_cam = depth_m
-        # Translate to gimbal pivot frame
-        x_g = x_cam - offset_x
-        y_g = y_cam - offset_y
-        z_g = z_cam - offset_z
-        if z_g <= 0.0:
-            # Target behind gimbal — fall back to direct angles
-            return atan2(px - cx, fx), atan2(py - cy, fy)
-        return atan2(x_g, z_g), atan2(y_g, z_g)
-
     def pixel_velocity_to_angular(self, vx_pps: float, vy_pps: float) -> tuple[float, float]:
         """Convert pixel velocity (px/sec) to angular velocity (rad/sec) using focal length."""
         fx, fy = self.focal_lengths_px

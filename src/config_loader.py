@@ -18,7 +18,6 @@ from src.config import (
     LaserBoresightConfig,
     LaserConfig,
     ModelConfig,
-    MountOffsetConfig,
     Orientation,
     PipelineConfig,
     PreflightConfig,
@@ -329,9 +328,6 @@ def build_config_from_yaml(
         min_brightness=int(laser_cfg.get("min_brightness", 200)),
     )
 
-    mount_cfg = yaml_data.get("mount_offset", {})
-    mount_offset = _overlay_dataclass(MountOffsetConfig(), mount_cfg)
-
     relay_cfg = yaml_data.get("relay", {})
     relay = RelayConfig(
         pulse_ms=int(relay_cfg.get("pulse_ms", 500)),
@@ -356,7 +352,6 @@ def build_config_from_yaml(
         paths=paths,
         flags=flags,
         gimbal=gimbal,
-        mount_offset=mount_offset,
         laser=laser,
         laser_boresight=laser_boresight,
         preflight=preflight,

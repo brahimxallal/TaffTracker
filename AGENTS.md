@@ -26,7 +26,7 @@ This repository is a low-latency vision-guided gimbal tracker with a Python mult
 
 - Configuration is modeled with frozen dataclasses in `src/config.py`, loaded from `config.yaml`, then overridden by CLI arguments.
 - Camera geometry uses a pinhole model with `atan2`-based pixel-to-angle conversion. Do not replace it with homography-style mapping for pan/tilt aiming.
-- If the camera is not co-located with the gimbal pivot, use `mount_offset` in `config.yaml`. Parallax compensation and pose-based depth estimation are part of the pipeline.
+- The camera is assumed to be effectively on-axis with the gimbal pivot. Parallax compensation and pose-based depth estimation have been removed; angles come straight from the pinhole `pixel_to_angle` mapping.
 - The calibration path is: camera intrinsics from `camera.fov` or `calibration_data/intrinsics.npz`, mount offset from `config.yaml`, servo mechanical limits from calibration data or firmware config.
 - Keep latency-sensitive code simple: avoid blocking I/O, avoid unnecessary allocations, and preserve the existing multiprocessing separation.
 - Tests are written to run without CUDA or TensorRT hardware. `tests/conftest.py` stubs hardware-only modules during collection.
@@ -49,7 +49,7 @@ This repository is a low-latency vision-guided gimbal tracker with a Python mult
 - `src/ui/hotkeys.py`: keyboard-event dispatch rules for the main display loop
 - `src/capture/process.py`: frame capture and ring-buffer writes
 - `src/capture/preflight.py`: thin re-export shim; real `FrameHealthMonitor` lives in `src/shared/preflight.py`
-- `src/inference/process.py`: TensorRT inference, tracking, smoothing, and parallax-aware angle generation
+- `src/inference/process.py`: TensorRT inference, tracking, smoothing, and pinhole pixel→angle generation
 - `src/inference/telemetry.py`: `format_profiler_summary` + `write_profiler_summary` — per-run profiler log line and shutdown-time CSV/JSON metrics dump
 - `src/inference/postprocess.py`: YOLO parsing and centroid selection logic
 - `src/output/process.py`: protocol encoding, comms, and output fail-safe behavior
@@ -61,7 +61,6 @@ This repository is a low-latency vision-guided gimbal tracker with a Python mult
 - `src/shared/protocol.py`: binary packet format used by firmware
 - `src/shared/preflight.py`: `FrameHealthMonitor` AE/AWB/AF-drift detector (consumed by the inference process)
 - `src/calibration/camera_model.py`: camera geometry and pixel-to-angle conversion
-- `src/calibration/depth_estimator.py`: pose-span depth estimation used by parallax correction
 - `config.yaml`: runtime tuning and hardware alignment source of truth
 - `scripts/export_engines.py`: required TensorRT export step
 - `scripts/calibrate.py`: unified servo limits + center + camera intrinsics + mount offset calibration

@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 
 from src.calibration.camera_model import CameraModel
-from src.config import MountOffsetConfig, TrackingConfig
+from src.config import TrackingConfig
 from src.inference.stages.centroid import CentroidStage
 from src.shared.types import Track
 
@@ -19,7 +19,6 @@ def _make_centroid_stage(**overrides) -> tuple[CentroidStage, mp.Value, mp.Value
     camera_model = CameraModel.from_fov(72.0, 640, 640)
     stage = CentroidStage(
         camera_model=camera_model,
-        mount_offset=MountOffsetConfig(),
         target="human",
     )
     return stage, command_pan, command_tilt
@@ -71,7 +70,6 @@ def test_compensate_measurement_for_egomotion_skips_stale_velocity_sample() -> N
 
 @pytest.mark.unit
 def test_build_message_reports_egomotion_applied_px_and_limits_false_velocity() -> None:
-    from src.config import MountOffsetConfig
     from src.inference.pipeline import TrackingPipeline
     from src.inference.postprocess import KeypointStabilizer
     from src.inference.stages.centroid import CentroidStage
@@ -101,7 +99,6 @@ def test_build_message_reports_egomotion_applied_px_and_limits_false_velocity() 
     )
     centroid_stage = CentroidStage(
         camera_model=camera_model,
-        mount_offset=MountOffsetConfig(),
         target="human",
     )
     servo_stage = ServoStage()
@@ -118,7 +115,6 @@ def test_build_message_reports_egomotion_applied_px_and_limits_false_velocity() 
         pose_schema=pose_schema,
         ema_pixel=ema_pixel,
         servo_ema_pixel=servo_ema_pixel,
-        depth_smoother=None,
     )
 
     dt = 1.0 / 60.0
