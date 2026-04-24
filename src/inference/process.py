@@ -6,7 +6,6 @@ import multiprocessing as mp
 import time
 from collections import deque
 from multiprocessing.sharedctypes import Synchronized
-from queue import Empty, Full
 from time import perf_counter_ns
 from traceback import format_exc
 
@@ -32,6 +31,7 @@ from src.inference.postprocess import (
     KeypointStabilizer,
     parse_yolo_output,
 )
+from src.inference.result_publisher import ResultPublisher
 from src.inference.stages.centroid import CentroidStage
 from src.inference.stages.servo import ServoStage
 from src.inference.stages.tracker import TrackerStage
@@ -95,9 +95,7 @@ class InferenceProcess(mp.Process):
         self._frames_processed = 0
         self._last_log_time = time.perf_counter()
         self._fps_window: deque[float] = deque(maxlen=30)
-        self._publish_drop_count = 0
-        self._publish_drop_window_count = 0
-        self._publish_drop_window_start = time.perf_counter()
+        self._publisher = ResultPublisher(result_queue, logger=LOGGER)
 
     def run(self) -> None:
         import sys
@@ -357,28 +355,7 @@ class InferenceProcess(mp.Process):
         return compute_dt(current_timestamp_ns, last_timestamp_ns, self._camera_config.fps)
 
     def _publish(self, message: TrackingMessage | None) -> None:
-        try:
-            self._result_queue.put_nowait(message)
-        except Full:
-            self._publish_drop_count += 1
-            self._publish_drop_window_count += 1
-            now = time.perf_counter()
-            if now - self._publish_drop_window_start >= 1.0:
-                LOGGER.warning(
-                    "Inference result queue backpressure: dropped %d messages in the last %.1fs",
-                    self._publish_drop_window_count,
-                    now - self._publish_drop_window_start,
-                )
-                self._publish_drop_window_count = 0
-                self._publish_drop_window_start = now
-            try:
-                self._result_queue.get_nowait()
-            except Empty:
-                pass
-            try:
-                self._result_queue.put_nowait(message)
-            except Full:
-                pass
+        self._publisher.publish(message)
 
     def _log_profiler_summary(
         self, profiler: StageProfiler, pipeline: TrackingPipeline, fps: float
@@ -387,7 +364,7 @@ class InferenceProcess(mp.Process):
             profiler,
             pipeline,
             fps=fps,
-            publish_drop_count=self._publish_drop_count,
+            publish_drop_count=self._publisher.total_drop_count,
         )
         if line is not None:
             LOGGER.info("Profiler summary | %s", line)
@@ -402,7 +379,7 @@ class InferenceProcess(mp.Process):
             csv_path=csv_path,
             summary_path=summary_path,
             metrics_path=metrics_path,
-            publish_drop_count=self._publish_drop_count,
+            publish_drop_count=self._publisher.total_drop_count,
         )
         LOGGER.info("Profiler summaries saved to %s and %s", csv_path, summary_path)
 
