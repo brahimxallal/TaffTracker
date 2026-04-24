@@ -279,6 +279,13 @@ class RuntimeFlags:
     profile: bool = False
     log_file: Path | None = None
     log_level: LogLevel = "INFO"
+    # When true, prefer the GPU letterbox path
+    # (:func:`src.inference.gpu_preprocess.gpu_letterbox`) over the inline
+    # CPU resize+pad in the capture process. Off by default until a
+    # benchmark on the deployed hardware shows it wins; flipping this
+    # without measuring can REGRESS latency on small frames where the
+    # H2D transfer cost outweighs the kernel speedup.
+    gpu_preprocess: bool = False
 
 
 @dataclass(frozen=True)

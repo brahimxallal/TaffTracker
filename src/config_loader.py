@@ -293,6 +293,9 @@ def build_config_from_yaml(
             else (Path(rt_cfg["log_file"]) if rt_cfg.get("log_file") else None)
         ),
         log_level="DEBUG" if debug else (cli.get("log_level") or rt_cfg.get("log_level", "INFO")),
+        gpu_preprocess=bool(
+            cli.get("gpu_preprocess", False) or rt_cfg.get("gpu_preprocess", False)
+        ),
     )
 
     gimbal_cfg = yaml_data.get("gimbal", {})

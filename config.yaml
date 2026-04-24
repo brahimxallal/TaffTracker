@@ -66,6 +66,10 @@ runtime:
   profile: true
   log_file: null
   log_level: INFO     # DEBUG | INFO | WARNING | ERROR
+  # Opt-in GPU letterbox path. Off by default — flip only after running
+  # `python scripts/benchmark_preprocess.py` on this host and confirming
+  # the GPU path is faster (small frames usually lose to H2D overhead).
+  gpu_preprocess: false
 
 # --- Laser Dot Detection ---
 laser:
