@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from math import degrees
 
 from src.config import GimbalConfig, ServoControlConfig
+from src.output.velocity_smoother import VelocitySmoother, VelocitySmootherConfig
 from src.shared.types import TrackingMessage
 
 
@@ -56,6 +57,7 @@ class AutoControllerConfig:
     effective_kp_near: float
     velocity_feedforward_gain: float
     derivative_filter_alpha: float
+    velocity_smoother: VelocitySmootherConfig
 
     @classmethod
     def from_configs(
@@ -79,6 +81,12 @@ class AutoControllerConfig:
             effective_kp_near=gimbal_config.effective_kp_near,
             velocity_feedforward_gain=gimbal_config.velocity_feedforward_gain,
             derivative_filter_alpha=servo_control_config.derivative_filter_alpha,
+            velocity_smoother=VelocitySmootherConfig(
+                enabled=servo_control_config.velocity_smoother_enabled,
+                alpha=servo_control_config.velocity_smoother_alpha,
+                deadband_dps=servo_control_config.velocity_smoother_deadband_dps,
+                slew_dps_per_s=servo_control_config.velocity_smoother_slew_dps_per_s,
+            ),
         )
 
 
@@ -98,6 +106,8 @@ class AutoControllerState:
     prev_d_pan: float = 0.0
     prev_d_tilt: float = 0.0
     last_encode_ts_ns: int | None = field(default=None)
+    velocity_smoother_pan: VelocitySmoother = field(default_factory=VelocitySmoother)
+    velocity_smoother_tilt: VelocitySmoother = field(default_factory=VelocitySmoother)
 
     def reset(self) -> None:
         """Zero all integrators + derivative history."""
@@ -108,6 +118,8 @@ class AutoControllerState:
         self.prev_d_pan = 0.0
         self.prev_d_tilt = 0.0
         self.last_encode_ts_ns = None
+        self.velocity_smoother_pan.reset()
+        self.velocity_smoother_tilt.reset()
 
 
 def _compute_dt_seconds(
@@ -129,20 +141,34 @@ def _compute_dt_seconds(
 
 def _compute_lead_error_deg(
     message: TrackingMessage,
+    state: AutoControllerState,
     config: AutoControllerConfig,
+    dt: float,
 ) -> tuple[float, float]:
     """Error angle including velocity-based predictive lead, sign-corrected.
 
     Lead is only applied when the target is moving fast enough (>30 dps)
     to be worth predicting; static targets get no lead so we don't
     amplify low-speed noise into command jitter.
+
+    When ``config.velocity_smoother.enabled`` is True, the velocity
+    components are passed through per-axis :class:`VelocitySmoother`
+    instances on ``state`` before being multiplied by the lead time.
+    With smoothing disabled (the default), the smoother is a pure
+    pass-through so behaviour is bit-identical to pre-smoother builds.
     """
     angles_rad = message.servo_angles or message.filtered_angles or (0.0, 0.0)
     vel_rad = message.servo_angular_velocity or message.angular_velocity or (0.0, 0.0)
-    speed_dps = (degrees(vel_rad[0]) ** 2 + degrees(vel_rad[1]) ** 2) ** 0.5
+    pan_vel_dps = state.velocity_smoother_pan.smooth(
+        degrees(vel_rad[0]), dt, config.velocity_smoother
+    )
+    tilt_vel_dps = state.velocity_smoother_tilt.smooth(
+        degrees(vel_rad[1]), dt, config.velocity_smoother
+    )
+    speed_dps = (pan_vel_dps**2 + tilt_vel_dps**2) ** 0.5
     lead = config.predictive_lead_s if speed_dps > 30.0 else 0.0
-    pan_err_deg = (degrees(angles_rad[0]) + degrees(vel_rad[0]) * lead) * config.pan_sign
-    tilt_err_deg = (degrees(angles_rad[1]) + degrees(vel_rad[1]) * lead) * config.tilt_sign
+    pan_err_deg = (degrees(angles_rad[0]) + pan_vel_dps * lead) * config.pan_sign
+    tilt_err_deg = (degrees(angles_rad[1]) + tilt_vel_dps * lead) * config.tilt_sign
     return pan_err_deg, tilt_err_deg
 
 
@@ -256,7 +282,7 @@ def compute_auto_command(
     dt = _compute_dt_seconds(message, state)
     state.last_encode_ts_ns = message.timestamp_ns
 
-    pan_err_deg, tilt_err_deg = _compute_lead_error_deg(message, config)
+    pan_err_deg, tilt_err_deg = _compute_lead_error_deg(message, state, config, dt)
 
     if message.target_acquired:
         return _track_error_command(message, state, config, pan_err_deg, tilt_err_deg, dt)

@@ -270,6 +270,13 @@ class ServoControlConfig:
     # error, NOT Kalman velocity, because Kalman velocity is polluted by
     # ego-motion on camera-on-gimbal mounts.
     derivative_filter_alpha: float = 0.35
+    # Velocity smoother for the predictive-lead path. Disabled by default;
+    # enabling is meaningful only when ``gimbal.predictive_lead_s > 0`` —
+    # see :mod:`src.output.velocity_smoother`.
+    velocity_smoother_enabled: bool = False
+    velocity_smoother_alpha: float = 0.4
+    velocity_smoother_deadband_dps: float = 5.0
+    velocity_smoother_slew_dps_per_s: float = 0.0
 
 
 @dataclass(frozen=True)
