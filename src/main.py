@@ -241,6 +241,7 @@ def main() -> None:
             capture_done_event,
             shutdown_event,
             error_queue,
+            gpu_preprocess=config.flags.gpu_preprocess,
         )
 
     def _make_inference():

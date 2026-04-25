@@ -54,6 +54,19 @@ def _build_capture_process(**overrides) -> CaptureProcess:
 
 
 @pytest.mark.unit
+def test_capture_process_defaults_gpu_preprocess_off() -> None:
+    """Wiring contract: default constructor keeps the CPU letterbox path."""
+    process = _build_capture_process()
+    assert process._gpu_preprocess is False
+
+
+@pytest.mark.unit
+def test_capture_process_accepts_gpu_preprocess_flag() -> None:
+    process = _build_capture_process(gpu_preprocess=True)
+    assert process._gpu_preprocess is True
+
+
+@pytest.mark.unit
 def test_rewind_file_capture_seeks_to_frame_zero() -> None:
     process = _build_capture_process()
     capture = _SeekableCapture()

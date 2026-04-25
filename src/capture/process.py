@@ -26,6 +26,7 @@ class CaptureProcess(mp.Process):
         capture_done_event: mp.synchronize.Event,
         shutdown_event: mp.synchronize.Event,
         error_queue: mp.Queue,
+        gpu_preprocess: bool = False,
     ) -> None:
         super().__init__(name="CaptureProcess")
         self._layout = layout
@@ -35,6 +36,7 @@ class CaptureProcess(mp.Process):
         self._capture_done_event = capture_done_event
         self._shutdown_event = shutdown_event
         self._error_queue = error_queue
+        self._gpu_preprocess = gpu_preprocess
         self._frame_count = 0
         self._last_log_time = time.perf_counter()
 
@@ -161,14 +163,25 @@ class CaptureProcess(mp.Process):
                 if portrait_crop_w > 0:
                     frame = frame[:, portrait_crop_x : portrait_crop_x + portrait_crop_w]
 
-                if lb_needs_resize:
+                if self._gpu_preprocess:
+                    # GPU path: hand the raw frame to the letterbox kernel
+                    # and copy the result back into the shared buffer. The
+                    # CPU pre-allocated `resized_frame` is reused as the
+                    # destination so the ring-buffer contract is unchanged.
+                    from src.inference.gpu_preprocess import gpu_letterbox
+
+                    out_tensor, _ = gpu_letterbox(frame, target_h, target_w)
+                    np.copyto(resized_frame, out_tensor.cpu().numpy())
+                elif lb_needs_resize:
                     scaled = cv2.resize(frame, (lb_new_w, lb_new_h), interpolation=cv2.INTER_LINEAR)
                     resized_frame[
-                        lb_pad_top : lb_pad_top + lb_new_h, lb_pad_left : lb_pad_left + lb_new_w
+                        lb_pad_top : lb_pad_top + lb_new_h,
+                        lb_pad_left : lb_pad_left + lb_new_w,
                     ] = scaled
                 elif lb_pad_top > 0 or lb_pad_left > 0:
                     resized_frame[
-                        lb_pad_top : lb_pad_top + lb_new_h, lb_pad_left : lb_pad_left + lb_new_w
+                        lb_pad_top : lb_pad_top + lb_new_h,
+                        lb_pad_left : lb_pad_left + lb_new_w,
                     ] = frame
                 else:
                     np.copyto(resized_frame, frame)
