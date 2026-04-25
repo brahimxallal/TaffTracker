@@ -2,41 +2,40 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from math import atan2, radians, tan
-from pathlib import Path
 
-import cv2
 import numpy as np
 
 
 @dataclass(frozen=True, slots=True)
 class CameraCalibration:
     camera_matrix: np.ndarray
-    distortion_coefficients: np.ndarray
     image_size: tuple[int, int]
 
 
 class CameraModel:
+    """Pinhole camera model used for pixel <-> angle conversion.
+
+    Built from a single FOV value (preferred) or as an identity fallback
+    for video-mode tests. Lens distortion correction has been removed —
+    the deployed phone-camera-on-gimbal mount does not produce visible
+    distortion at the working distances, and the prior checkerboard
+    calibration path was never reliably reproducible.
+    """
+
     def __init__(self, calibration: CameraCalibration) -> None:
         self._calibration = calibration
-        width, height = calibration.image_size
-        self._is_identity = not np.any(calibration.distortion_coefficients)
-        self._map1, self._map2 = cv2.initUndistortRectifyMap(
-            calibration.camera_matrix,
-            calibration.distortion_coefficients,
-            None,
-            calibration.camera_matrix,
-            (width, height),
-            cv2.CV_32FC1,
-        )
 
     @classmethod
     def identity(cls, width: int, height: int) -> CameraModel:
         camera_matrix = np.array(
-            [[float(width), 0.0, width / 2.0], [0.0, float(height), height / 2.0], [0.0, 0.0, 1.0]],
+            [
+                [float(width), 0.0, width / 2.0],
+                [0.0, float(height), height / 2.0],
+                [0.0, 0.0, 1.0],
+            ],
             dtype=np.float32,
         )
-        distortion = np.zeros((5, 1), dtype=np.float32)
-        return cls(CameraCalibration(camera_matrix, distortion, (width, height)))
+        return cls(CameraCalibration(camera_matrix, (width, height)))
 
     @classmethod
     def from_fov(cls, hfov_degrees: float, width: int, height: int) -> CameraModel:
@@ -47,22 +46,7 @@ class CameraModel:
             [[fx, 0.0, width / 2.0], [0.0, fy, height / 2.0], [0.0, 0.0, 1.0]],
             dtype=np.float32,
         )
-        distortion = np.zeros((5, 1), dtype=np.float32)
-        return cls(CameraCalibration(camera_matrix, distortion, (width, height)))
-
-    @classmethod
-    def load(cls, path: str | Path) -> CameraModel:
-        calibration_file = Path(path)
-        if not calibration_file.exists():
-            raise FileNotFoundError(f"Calibration file not found: {calibration_file}")
-        payload = np.load(calibration_file)
-        return cls(
-            CameraCalibration(
-                camera_matrix=payload["camera_matrix"],
-                distortion_coefficients=payload["distortion_coefficients"],
-                image_size=(int(payload["image_width"]), int(payload["image_height"])),
-            )
-        )
+        return cls(CameraCalibration(camera_matrix, (width, height)))
 
     @property
     def image_size(self) -> tuple[int, int]:
@@ -80,11 +64,6 @@ class CameraModel:
             float(self._calibration.camera_matrix[0, 0]),
             float(self._calibration.camera_matrix[1, 1]),
         )
-
-    def undistort(self, frame: np.ndarray) -> np.ndarray:
-        if self._is_identity:
-            return frame
-        return cv2.remap(frame, self._map1, self._map2, interpolation=cv2.INTER_LINEAR)
 
     def pixel_to_angle(self, px: float, py: float) -> tuple[float, float]:
         # Pinhole projection maps image offsets directly into angular

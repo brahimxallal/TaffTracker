@@ -28,43 +28,25 @@ def load_camera_model(
     runtime_paths: RuntimePaths,
     logger: logging.Logger,
 ) -> CameraModel:
-    """Resolve the camera model with calibration → FOV → identity fallback.
+    """Resolve the camera model from configured FOV (or identity in video mode).
 
     Priority:
-      1. ``calibration_data/intrinsics.npz`` if its image size matches runtime.
-      2. ``camera.fov`` from config.yaml.
-      3. Identity camera model (video mode only).
+      1. ``camera.fov`` from config.yaml — preferred and required for camera mode.
+      2. Identity camera model (video mode only fallback).
 
-    Raises :class:`ValueError` when running in ``camera`` mode with no FOV and
-    no usable calibration file, because downstream aiming math would silently
-    produce garbage.
+    Raises :class:`ValueError` when running in ``camera`` mode with no FOV
+    configured, because downstream aiming math would silently produce
+    garbage. Intrinsic (checkerboard) calibration was removed — measure
+    the camera HFOV once and set ``camera.fov`` in ``config.yaml``.
     """
-    calibration_path = runtime_paths.calibration_file_path()
-    if calibration_path.exists():
-        try:
-            model = CameraModel.load(calibration_path)
-        except Exception as exc:
-            logger.warning(
-                "Failed to load camera calibration from %s: %s",
-                calibration_path,
-                exc,
-            )
-        else:
-            if model.image_size == (camera_config.width, camera_config.height):
-                logger.info("Using camera calibration from %s", calibration_path)
-                return model
-            logger.warning(
-                "Calibration image size %s does not match runtime size (%d, %d); falling back",
-                model.image_size,
-                camera_config.width,
-                camera_config.height,
-            )
+    del runtime_paths  # no longer needed; kept in signature for callers
     if camera_config.fov is not None:
         logger.info("Using configured FOV %.1f deg", camera_config.fov)
         return CameraModel.from_fov(camera_config.fov, camera_config.width, camera_config.height)
     if mode == "camera":
         raise ValueError(
-            "camera.fov must be set or calibration_data/intrinsics.npz must exist for camera mode"
+            "camera.fov must be set in config.yaml for camera mode "
+            "(intrinsic checkerboard calibration is no longer supported)"
         )
     logger.warning("No FOV configured, falling back to identity camera model")
     return CameraModel.identity(camera_config.width, camera_config.height)

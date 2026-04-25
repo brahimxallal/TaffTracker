@@ -85,29 +85,52 @@ Re-export when you change:
 
 ---
 
-## 5. Camera calibration (optional but recommended)
+## 5. Camera calibration
 
-### 5.1 Intrinsics
-Print a checkerboard (do **not** use a phone screen — we tried, it gives bad results) and run:
-```bash
-python scripts/calibrate.py --camera-id 0 --frames 20
-```
-Output: `calibration_data/intrinsics.npz` — picked up automatically by `CameraModel`.
-
-### 5.2 Camera FOV fallback
-If you skip intrinsic calibration, set your camera HFOV in `config.yaml`:
+### 5.1 Camera FOV
+The aiming math uses a pinhole model derived from a single horizontal
+field-of-view value. Measure your camera's HFOV once (a ruler at a
+known distance is fine — see ["Measuring camera HFOV"](#measuring-camera-hfov))
+and set it in `config.yaml`:
 ```yaml
 camera:
-  hfov_deg: 66.2      # measure once, e.g. with a ruler at known distance
+  hfov_deg: 66.2      # phone camera example; set to your camera's value
 ```
 `CameraModel.from_fov()` computes focal length as `fx = (width/2) / tan(hfov/2)`.
 
-### 5.3 Laser boresight (visual-servo mode only)
+> Earlier versions supported intrinsic checkerboard calibration via
+> `intrinsics.npz`. That path was removed — the printed-checkerboard
+> workflow was never reliably reproducible on the deployed phone-camera
+> mount, and the FOV-only path is accurate enough for sub-degree
+> aiming at the working distances we hit in practice.
+
+### 5.2 Laser boresight (visual-servo mode only)
 Paint a dot on a wall at ~2 m, engage the laser, point the gimbal at the dot, then:
 ```bash
 python scripts/laser_capture.py
 ```
 Records the pixel offset between optical center and laser impact. Stored in `calibration_data/laser_boresight.json`.
+
+### 5.3 Gimbal center calibration
+Align the laser with the optical center and persist servo offsets to ESP32 NVS:
+```bash
+python scripts/calibrate.py --port COM4
+```
+Saves `calibration_data/servo_limits.json` and pushes the offsets to
+firmware so the next boot uses them automatically.
+
+#### Measuring camera HFOV
+Place an object of known width `W` (e.g. a 30 cm ruler) at a known
+distance `D` (e.g. 1.0 m) perpendicular to the camera. Note the pixel
+width `w` it spans in the frame, then:
+
+```
+hfov_deg = 2 * degrees(atan((W / 2) / D))
+```
+
+A 30 cm ruler at 1 m on a phone camera typically gives ~28°
+horizontally for a tight crop or ~66° for the wide lens — pick the
+lens you'll actually run.
 
 ---
 

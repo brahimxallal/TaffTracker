@@ -9,9 +9,7 @@ from __future__ import annotations
 
 import logging
 from math import isclose
-from pathlib import Path
 
-import numpy as np
 import pytest
 
 from src.config import CameraConfig, ModelConfig, RuntimePaths
@@ -75,55 +73,6 @@ def test_load_camera_model_video_mode_falls_back_to_identity() -> None:
         logger=_LOGGER,
     )
     assert isclose(model.focal_length_px, 640.0, rel_tol=1e-5)
-
-
-@pytest.mark.unit
-def test_load_camera_model_prefers_saved_intrinsics(tmp_path: Path) -> None:
-    calibration_dir = tmp_path / "calibration_data"
-    calibration_dir.mkdir()
-    np.savez(
-        calibration_dir / "intrinsics.npz",
-        camera_matrix=np.array(
-            [[500.0, 0.0, 320.0], [0.0, 510.0, 320.0], [0.0, 0.0, 1.0]],
-            dtype=np.float32,
-        ),
-        distortion_coefficients=np.zeros((5, 1), dtype=np.float32),
-        image_width=640,
-        image_height=640,
-    )
-    model = load_camera_model(
-        mode="camera",
-        camera_config=CameraConfig(width=640, height=640, fov=72.0),
-        runtime_paths=RuntimePaths(workspace_root=tmp_path, calibration_dir=calibration_dir),
-        logger=_LOGGER,
-    )
-    # Calibration wins over configured FOV — focal_length comes from intrinsics.
-    assert isclose(model.focal_length_px, 500.0, rel_tol=1e-5)
-
-
-@pytest.mark.unit
-def test_load_camera_model_falls_back_when_calibration_shape_mismatches(tmp_path: Path) -> None:
-    calibration_dir = tmp_path / "calibration_data"
-    calibration_dir.mkdir()
-    # Calibration is 1280x720 — won't match runtime's 640x640.
-    np.savez(
-        calibration_dir / "intrinsics.npz",
-        camera_matrix=np.array(
-            [[900.0, 0.0, 640.0], [0.0, 900.0, 360.0], [0.0, 0.0, 1.0]],
-            dtype=np.float32,
-        ),
-        distortion_coefficients=np.zeros((5, 1), dtype=np.float32),
-        image_width=1280,
-        image_height=720,
-    )
-    model = load_camera_model(
-        mode="camera",
-        camera_config=CameraConfig(width=640, height=640, fov=72.0),
-        runtime_paths=RuntimePaths(workspace_root=tmp_path, calibration_dir=calibration_dir),
-        logger=_LOGGER,
-    )
-    # Falls back to FOV, not calibration.
-    assert model.image_size == (640, 640)
 
 
 # --- load_pose_schema ---

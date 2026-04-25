@@ -172,9 +172,6 @@ class RuntimePaths:
     def resolve_path(self, path: Path) -> Path:
         return path if path.is_absolute() else self.workspace_root / path
 
-    def calibration_file_path(self) -> Path:
-        return self.resolve_path(self.calibration_dir) / "intrinsics.npz"
-
     def resolved_dog_pose_schema_path(self) -> Path:
         return self.resolve_path(self.dog_pose_schema_path)
 

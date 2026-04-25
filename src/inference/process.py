@@ -263,9 +263,9 @@ class InferenceProcess(mp.Process):
                     tracker_stage.request_cycle()
                     LOGGER.info("Cycle target requested by user")
 
-                undistorted = camera_model.undistort(record.frame)
+                frame = record.frame
 
-                for warning in health_monitor.check(undistorted):
+                for warning in health_monitor.check(frame):
                     LOGGER.warning(warning)
 
                 wait_ms = (perf_counter_ns() - record.timestamp_ns) / 1_000_000.0
@@ -273,7 +273,7 @@ class InferenceProcess(mp.Process):
 
                 inference_start_ns = perf_counter_ns()
                 with profiler.stage("inference"):
-                    raw_output = engine.infer(undistorted)
+                    raw_output = engine.infer(frame)
                 inference_ms = (perf_counter_ns() - inference_start_ns) / 1_000_000.0
 
                 # Rolling FPS
@@ -303,7 +303,7 @@ class InferenceProcess(mp.Process):
 
                     message, was_lost, current_locked, prev_locked_bbox = pipeline.process_frame(
                         record=record,
-                        undistorted=undistorted,
+                        frame=frame,
                         tracks=tracks,
                         prev_locked_id=prev_locked_id,
                         was_lost=was_lost,

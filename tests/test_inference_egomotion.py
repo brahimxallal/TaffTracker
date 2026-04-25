@@ -131,7 +131,7 @@ def test_build_message_reports_egomotion_applied_px_and_limits_false_velocity() 
 
     message0, was_lost0, _, _ = pipeline.process_frame(
         record=record0,
-        undistorted=record0.frame,
+        frame=record0.frame,
         tracks=[track0],
         prev_locked_id=None,
         was_lost=False,
@@ -148,7 +148,7 @@ def test_build_message_reports_egomotion_applied_px_and_limits_false_velocity() 
 
     message1, _, _, _ = pipeline.process_frame(
         record=record1,
-        undistorted=record1.frame,
+        frame=record1.frame,
         tracks=[track1],
         prev_locked_id=tracker_stage.locked_track_id,
         was_lost=False,

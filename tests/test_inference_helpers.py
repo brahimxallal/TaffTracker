@@ -5,7 +5,6 @@ from __future__ import annotations
 import multiprocessing as mp
 from math import degrees, isclose
 
-import numpy as np
 import pytest
 
 from src.config import (
@@ -74,32 +73,6 @@ def test_load_camera_model_identity_fallback_in_video_mode() -> None:
     assert model.image_size == (640, 640)
     # Identity model has focal_length = width
     assert isclose(model.focal_length_px, 640.0, rel_tol=1e-5)
-
-
-@pytest.mark.unit
-def test_load_camera_model_from_saved_intrinsics(tmp_path) -> None:
-    calibration_dir = tmp_path / "calibration_data"
-    calibration_dir.mkdir()
-    calibration_path = calibration_dir / "intrinsics.npz"
-    np.savez(
-        calibration_path,
-        camera_matrix=np.array(
-            [[500.0, 0.0, 320.0], [0.0, 510.0, 320.0], [0.0, 0.0, 1.0]],
-            dtype=np.float32,
-        ),
-        distortion_coefficients=np.zeros((5, 1), dtype=np.float32),
-        image_width=640,
-        image_height=640,
-    )
-    proc = _build_inference_proc(
-        camera_config=CameraConfig(width=640, height=640, fov=72.0),
-        runtime_paths=RuntimePaths(workspace_root=tmp_path, calibration_dir=calibration_dir),
-    )
-
-    model = proc._load_camera_model()
-
-    assert model.image_size == (640, 640)
-    assert isclose(model.focal_length_px, 500.0, rel_tol=1e-5)
 
 
 # --- _compute_dt ---

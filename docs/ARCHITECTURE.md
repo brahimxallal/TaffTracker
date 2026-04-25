@@ -59,7 +59,7 @@ Inter-process plumbing:
 ## 3. Inference Pipeline
 
 ```
-frame ──▶ undistort ──▶ TensorRT YOLO ──▶ postprocess ──▶ BoTSORT ──▶ Kalman + ORU ──▶ centroid ──▶ 1€ filter ──▶ (optional) laser ──▶ TrackingMessage
+frame ──▶ TensorRT YOLO ──▶ postprocess ──▶ BoTSORT ──▶ Kalman + ORU ──▶ centroid ──▶ 1€ filter ──▶ (optional) laser ──▶ TrackingMessage
 ```
 
 Notable stages:
@@ -69,7 +69,7 @@ Notable stages:
 - **Tracker**: BoTSORT for multi-object association; per-track Kalman state (`src/tracking/kalman.py`) with adaptive R/Q, 8σ Mahalanobis innovation gating, OC-SORT observation re-update, prediction capping (30 max).
 - **Lock policy** (`src/inference/process.py`): single-source `_select_primary_track` per frame. Spatial-proximity re-lock when a recent target reappears nearby. Per-track state cache (8 entries, evict oldest) snapshots Kalman + stabilizer + EMA across lock transitions so the gimbal doesn't snap.
 - **Adaptive controller** (`src/tracking/adaptive.py`): rolling 120-frame detection-reliability window and 60-frame speed window auto-tune confidence thresholds and hold-time at runtime, in addition to FPS-driven Q / `max_lost` adaptation.
-- **Pinhole geometry** (`src/calibration/camera_model.py`): `pixel_to_angle` via `atan2`, `pixel_velocity_to_angular` for lead. Intrinsics from `calibration_data/intrinsics.npz` if present, otherwise `camera.fov` from `config.yaml`, otherwise identity fallback.
+- **Pinhole geometry** (`src/calibration/camera_model.py`): `pixel_to_angle` via `atan2`, `pixel_velocity_to_angular` for lead. Focal length is derived from `camera.fov` in `config.yaml` (FOV-only — checkerboard intrinsics removed).
 
 The output is a `TrackingMessage` (`src/shared/types.py`) carrying servo angles, angular velocity, hold-time, latency totals, and tracker state.
 

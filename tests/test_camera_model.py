@@ -1,9 +1,8 @@
 from math import degrees, isclose, radians, tan
 
-import numpy as np
 import pytest
 
-from src.calibration.camera_model import CameraCalibration, CameraModel
+from src.calibration.camera_model import CameraModel
 
 
 @pytest.mark.unit
@@ -107,63 +106,6 @@ def test_positive_pan_velocity_moves_stationary_target_left_in_image() -> None:
 
 
 # --- load() tests ---
-
-
-@pytest.mark.unit
-def test_load_from_npz(tmp_path) -> None:
-    width, height = 640, 480
-    camera_matrix = np.array(
-        [[500.0, 0.0, 320.0], [0.0, 500.0, 240.0], [0.0, 0.0, 1.0]], dtype=np.float32
-    )
-    distortion = np.zeros((5, 1), dtype=np.float32)
-    npz_path = tmp_path / "intrinsics.npz"
-    np.savez(
-        npz_path,
-        camera_matrix=camera_matrix,
-        distortion_coefficients=distortion,
-        image_width=width,
-        image_height=height,
-    )
-
-    model = CameraModel.load(npz_path)
-
-    assert model.image_size == (640, 480)
-    assert isclose(model.focal_length_px, 500.0, rel_tol=1e-5)
-
-
-@pytest.mark.unit
-def test_load_nonexistent_file_raises() -> None:
-    with pytest.raises(FileNotFoundError):
-        CameraModel.load("/nonexistent/path/intrinsics.npz")
-
-
-# --- undistort() tests ---
-
-
-@pytest.mark.unit
-def test_undistort_identity_returns_same_frame() -> None:
-    model = CameraModel.identity(8, 8)
-    frame = np.zeros((8, 8, 3), dtype=np.uint8)
-    frame[3, 4] = [100, 200, 50]
-
-    result = model.undistort(frame)
-
-    assert result is frame  # identity → no copy
-
-
-@pytest.mark.unit
-def test_undistort_with_distortion_returns_remapped() -> None:
-    camera_matrix = np.array(
-        [[200.0, 0.0, 4.0], [0.0, 200.0, 4.0], [0.0, 0.0, 1.0]], dtype=np.float32
-    )
-    distortion = np.array([[0.1, -0.05, 0.0, 0.0, 0.0]], dtype=np.float32).reshape(5, 1)
-    model = CameraModel(CameraCalibration(camera_matrix, distortion, (8, 8)))
-    frame = np.ones((8, 8, 3), dtype=np.uint8) * 128
-
-    result = model.undistort(frame)
-
-    assert result is not frame  # distorted → remapped copy
-    assert result.shape == frame.shape
 
 
 # --- image_size and focal_length_px ---
