@@ -96,6 +96,13 @@
 #endif
 
 /* WiFi credentials: set via sdkconfig menuconfig or build flags, NOT here. */
+/* ARIA: Empty defaults keep USB-only builds compiling when wifi_secrets.env is absent. */
+#ifndef CONFIG_TAFFF_WIFI_SSID
+#define CONFIG_TAFFF_WIFI_SSID ""
+#endif
+#ifndef CONFIG_TAFFF_WIFI_PASS
+#define CONFIG_TAFFF_WIFI_PASS ""
+#endif
 #ifndef WIFI_SSID
 #define WIFI_SSID            CONFIG_TAFFF_WIFI_SSID
 #endif

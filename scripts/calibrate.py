@@ -23,6 +23,7 @@ Controls (manual jog):
     ENTER              : start auto-refine
     ESC                : accept current position
 """
+
 from __future__ import annotations
 
 import argparse
@@ -45,13 +46,14 @@ from src.shared.protocol import (
     CAL_CMD_GET_OFFSETS,
     CAL_CMD_SET_OFFSETS,
     CAL_PACKET_SIZE,
-    STATE_MEASUREMENT,
-    FLAG_TARGET_ACQUIRED,
     FLAG_LASER_ON,
+    FLAG_TARGET_ACQUIRED,
+    HEADER_CAL,
+    STATE_MEASUREMENT,
     decode_cal_response,
     encode_cal_get_offsets,
-    encode_packet_v2,
     encode_cal_set_offsets,
+    encode_packet_v2,
 )
 
 # ── Paths ────────────────────────────────────────────────────────────────
@@ -84,8 +86,10 @@ _gpu_checked = False
 #  Transport abstraction (serial only)
 # ═══════════════════════════════════════════════════════════════════════
 
+
 class Transport:
     """Thin wrapper around the serial transport used by calibration."""
+
     def write(self, data: bytes) -> None:
         raise NotImplementedError
 
@@ -95,11 +99,13 @@ class Transport:
     def reset_input_buffer(self) -> None:
         raise NotImplementedError
 
+
 class SerialTransport(Transport):
     def __init__(self, port: str, baud: int) -> None:
         print(f"  Opening {port} at {baud}...")
         self._ser = serial.Serial(port, baud, timeout=0.01)
         time.sleep(0.3)
+
     def write(self, data: bytes) -> None:
         self._ser.write(data)
 
@@ -125,6 +131,7 @@ class SerialTransport(Transport):
 #  Helpers
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def _check_gpu() -> bool:
     """Lazy GPU check — runs once."""
     global _gpu_available, _gpu_checked
@@ -139,7 +146,9 @@ def _check_gpu() -> bool:
     return _gpu_available
 
 
-def send_angles(ser: Transport, pan_deg: float, tilt_deg: float, seq: int, *, laser_on: bool = True) -> None:
+def send_angles(
+    ser: Transport, pan_deg: float, tilt_deg: float, seq: int, *, laser_on: bool = True
+) -> None:
     """Send a v2 protocol packet with given pan/tilt degrees."""
     state = STATE_MEASUREMENT | FLAG_TARGET_ACQUIRED
     if laser_on:
@@ -171,35 +180,47 @@ def hold_position(ser: Transport, pan: float, tilt: float, duration_ms: int, seq
 
 def make_laser_detector() -> LaserDetector:
     """Create a laser detector with relaxed thresholds for calibration."""
-    return LaserDetector(LaserConfig(
-        enabled=True,
-        hue_low_upper=15,
-        hue_high_lower=165,
-        sat_min=40,
-        val_min=100,
-        min_area=1.0,
-        max_area=1500.0,
-        min_circularity=0.05,
-        roi_radius_px=1000.0,
-    ))
+    return LaserDetector(
+        LaserConfig(
+            enabled=True,
+            hue_low_upper=15,
+            hue_high_lower=165,
+            sat_min=40,
+            val_min=100,
+            min_area=1.0,
+            max_area=1500.0,
+            min_circularity=0.05,
+            roi_radius_px=1000.0,
+        )
+    )
 
 
 def parse_jog_key(raw_key: int) -> tuple[float, float]:
     """Parse arrow/ZQSD/+- keys into (d_pan, d_tilt). Returns (0, 0) if unrecognised."""
     key = raw_key & 0xFF
-    if raw_key == _KEY_LEFT:   return (-MANUAL_JOG_STEP_DEG, 0.0)
-    if raw_key == _KEY_RIGHT:  return (+MANUAL_JOG_STEP_DEG, 0.0)
-    if raw_key == _KEY_UP:     return (0.0, +MANUAL_JOG_STEP_DEG)
-    if raw_key == _KEY_DOWN:   return (0.0, -MANUAL_JOG_STEP_DEG)
+    if raw_key == _KEY_LEFT:
+        return (-MANUAL_JOG_STEP_DEG, 0.0)
+    if raw_key == _KEY_RIGHT:
+        return (+MANUAL_JOG_STEP_DEG, 0.0)
+    if raw_key == _KEY_UP:
+        return (0.0, +MANUAL_JOG_STEP_DEG)
+    if raw_key == _KEY_DOWN:
+        return (0.0, -MANUAL_JOG_STEP_DEG)
 
     key_lower = chr(key).lower() if key else ""
     step = MANUAL_JOG_FAST_STEP_DEG if chr(key).isupper() else MANUAL_JOG_STEP_DEG
-    if key_lower == "q":  return (-step, 0.0)
-    if key_lower == "d":  return (+step, 0.0)
-    if key_lower == "z":  return (0.0, +step)
-    if key_lower == "s":  return (0.0, -step)
-    if key == ord("+") or key == ord("="):  return (0.1, 0.0)
-    if key == ord("-"):                     return (-0.1, 0.0)
+    if key_lower == "q":
+        return (-step, 0.0)
+    if key_lower == "d":
+        return (+step, 0.0)
+    if key_lower == "z":
+        return (0.0, +step)
+    if key_lower == "s":
+        return (0.0, -step)
+    if key == ord("+") or key == ord("="):
+        return (0.1, 0.0)
+    if key == ord("-"):
+        return (-0.1, 0.0)
     return (0.0, 0.0)
 
 
@@ -217,6 +238,7 @@ def load_config_values() -> tuple[float, bool, bool]:
     invert_tilt = False
     if CONFIG_PATH.exists():
         import yaml
+
         with open(CONFIG_PATH, encoding="utf-8") as f:
             data = yaml.safe_load(f) or {}
         cam = data.get("camera", {})
@@ -228,12 +250,42 @@ def load_config_values() -> tuple[float, bool, bool]:
     return fov, invert_pan, invert_tilt
 
 
+def read_cal_response_packet(
+    ser: Transport,
+    expected_command: int,
+    timeout_s: float = 0.3,
+) -> bytes:
+    """Read one valid calibration response, skipping log bytes on the shared USB stream."""
+    # ARIA: Firmware logs and 0xCC calibration ACKs share USB Serial/JTAG; resync on header.
+    deadline = time.perf_counter() + timeout_s
+    while time.perf_counter() < deadline:
+        remaining = max(0.0, deadline - time.perf_counter())
+        first = ser.read(1, timeout_s=min(0.05, remaining))
+        if not first:
+            continue
+        if first[0] != HEADER_CAL:
+            continue
+
+        payload = bytearray()
+        while len(payload) < CAL_PACKET_SIZE - 1 and time.perf_counter() < deadline:
+            remaining = max(0.0, deadline - time.perf_counter())
+            chunk = ser.read(CAL_PACKET_SIZE - 1 - len(payload), timeout_s=min(0.05, remaining))
+            if chunk:
+                payload.extend(chunk)
+        if len(payload) == CAL_PACKET_SIZE - 1:
+            candidate = first + bytes(payload)
+            decoded = decode_cal_response(candidate)
+            if decoded is not None and decoded.command == expected_command:
+                return candidate
+    return b""
+
+
 def read_current_offsets(ser: Transport) -> tuple[float, float] | None:
     ser.reset_input_buffer()
     ser.write(encode_cal_get_offsets())
-    response = ser.read(CAL_PACKET_SIZE, timeout_s=0.3)
+    response = read_cal_response_packet(ser, CAL_CMD_GET_OFFSETS, timeout_s=0.3)
     decoded = decode_cal_response(response)
-    if decoded is None or decoded.command != CAL_CMD_GET_OFFSETS:
+    if decoded is None:
         return None
     return decoded.pan_offset_deg, decoded.tilt_offset_deg
 
@@ -241,19 +293,17 @@ def read_current_offsets(ser: Transport) -> tuple[float, float] | None:
 def write_offsets_and_confirm(ser: Transport, pan: float, tilt: float) -> bool:
     ser.reset_input_buffer()
     ser.write(encode_cal_set_offsets(pan, tilt))
-    response = ser.read(CAL_PACKET_SIZE, timeout_s=0.3)
+    response = read_cal_response_packet(ser, CAL_CMD_SET_OFFSETS, timeout_s=0.3)
     decoded = decode_cal_response(response)
-    if decoded is None or decoded.command != CAL_CMD_SET_OFFSETS:
+    if decoded is None:
         return False
-    return (
-        abs(decoded.pan_offset_deg - pan) <= 0.01
-        and abs(decoded.tilt_offset_deg - tilt) <= 0.01
-    )
+    return abs(decoded.pan_offset_deg - pan) <= 0.01 and abs(decoded.tilt_offset_deg - tilt) <= 0.01
 
 
 # ═══════════════════════════════════════════════════════════════════════
 #  Differential laser detection (ON/OFF subtraction)
 # ═══════════════════════════════════════════════════════════════════════
+
 
 def _capture_median_frame(cap: cv2.VideoCapture, n_frames: int) -> np.ndarray | None:
     """Capture n_frames and return the per-pixel median frame."""
@@ -281,8 +331,9 @@ def _diff_find_blob(diff: np.ndarray) -> tuple[float, float] | None:
         gray[~red_dominant] = 0
 
     _, thresh = cv2.threshold(gray, DIFF_THRESHOLD, 255, cv2.THRESH_BINARY)
-    thresh = cv2.morphologyEx(thresh, cv2.MORPH_CLOSE,
-                              cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+    thresh = cv2.morphologyEx(
+        thresh, cv2.MORPH_CLOSE, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5))
+    )
     contours, _ = cv2.findContours(thresh, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return None
@@ -297,7 +348,7 @@ def _diff_find_blob(diff: np.ndarray) -> tuple[float, float] | None:
         cx = m["m10"] / m["m00"]
         cy = m["m01"] / m["m00"]
         bx, by, bw, bh = cv2.boundingRect(cnt)
-        peak = float(gray[by:by + bh, bx:bx + bw].max()) if bw > 0 and bh > 0 else 0.0
+        peak = float(gray[by : by + bh, bx : bx + bw].max()) if bw > 0 and bh > 0 else 0.0
         if peak > best_brightness:
             best_brightness = peak
             best_cx, best_cy = cx, cy
@@ -343,8 +394,10 @@ def detect_laser_differential(
 
     if use_gpu:
         try:
-            g_bg = cv2.cuda_GpuMat(); g_fg = cv2.cuda_GpuMat()
-            g_bg.upload(bg); g_fg.upload(fg)
+            g_bg = cv2.cuda_GpuMat()
+            g_fg = cv2.cuda_GpuMat()
+            g_bg.upload(bg)
+            g_fg.upload(fg)
             diff = cv2.cuda.absdiff(g_fg, g_bg).download()
         except Exception:
             diff = cv2.absdiff(fg, bg)
@@ -359,10 +412,15 @@ def detect_laser_differential(
 #  UI
 # ═══════════════════════════════════════════════════════════════════════
 
-def draw_center_ui(frame: np.ndarray, pan: float, tilt: float,
-                   laser_px: tuple[float, float] | None,
-                   error_px: tuple[float, float] | None,
-                   label: str) -> np.ndarray:
+
+def draw_center_ui(
+    frame: np.ndarray,
+    pan: float,
+    tilt: float,
+    laser_px: tuple[float, float] | None,
+    error_px: tuple[float, float] | None,
+    label: str,
+) -> np.ndarray:
     """Overlay calibration UI on camera frame."""
     display = frame.copy()
     h, w = display.shape[:2]
@@ -382,28 +440,64 @@ def draw_center_ui(frame: np.ndarray, pan: float, tilt: float,
 
     # Status bar (top)
     cv2.rectangle(display, (0, 0), (w, 55), (0, 0, 0), -1)
-    cv2.putText(display, f"CALIBRATION  [{label}]", (10, 18),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 255), 1)
-    cv2.putText(display, f"Pan:{pan:+.2f}  Tilt:{tilt:+.2f}", (10, 38),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+    cv2.putText(
+        display,
+        f"CALIBRATION  [{label}]",
+        (10, 18),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.5,
+        (0, 255, 255),
+        1,
+    )
+    cv2.putText(
+        display,
+        f"Pan:{pan:+.2f}  Tilt:{tilt:+.2f}",
+        (10, 38),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.45,
+        (255, 255, 255),
+        1,
+    )
     if error_px is not None:
         err_mag = (error_px[0] ** 2 + error_px[1] ** 2) ** 0.5
         color = (0, 255, 0) if err_mag < 5 else (0, 200, 255) if err_mag < 20 else (0, 100, 255)
-        cv2.putText(display, f"Error: ({error_px[0]:+.1f}, {error_px[1]:+.1f}) px  [{err_mag:.0f}]",
-                    (280, 38), cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1)
+        cv2.putText(
+            display,
+            f"Error: ({error_px[0]:+.1f}, {error_px[1]:+.1f}) px  [{err_mag:.0f}]",
+            (280, 38),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.45,
+            color,
+            1,
+        )
     if laser_px is None:
-        cv2.putText(display, "NO LASER DETECTED", (w // 2 - 100, h - 15),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+        cv2.putText(
+            display,
+            "NO LASER DETECTED",
+            (w // 2 - 100, h - 15),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 0, 255),
+            2,
+        )
 
     # Help bar (bottom)
-    cv2.putText(display, "ENTER:auto-refine | Arrows/ZQSD:manual jog | ESC:done",
-                (10, h - 5), cv2.FONT_HERSHEY_SIMPLEX, 0.35, (150, 150, 150), 1)
+    cv2.putText(
+        display,
+        "ENTER:auto-refine | Arrows/ZQSD:manual jog | ESC:done",
+        (10, h - 5),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.35,
+        (150, 150, 150),
+        1,
+    )
     return display
 
 
 # ═══════════════════════════════════════════════════════════════════════
 #  Calibration
 # ═══════════════════════════════════════════════════════════════════════
+
 
 def calibrate(ser: Transport, cap: cv2.VideoCapture, auto: bool = False) -> dict | None:
     """Main calibration routine: manual jog + auto-refine, then save offsets."""
@@ -436,7 +530,9 @@ def calibrate(ser: Transport, cap: cv2.VideoCapture, auto: bool = False) -> dict
     else:
         print("\n  CENTER CALIBRATION")
         print("  Laser ON. Jog to center, then ENTER for auto-refine.\n")
-    print(f"  Current firmware trim: pan={base_pan_offset:+.3f} deg  tilt={base_tilt_offset:+.3f} deg")
+    print(
+        f"  Current firmware trim: pan={base_pan_offset:+.3f} deg  tilt={base_tilt_offset:+.3f} deg"
+    )
 
     label = "AUTO" if auto else "MANUAL JOG"
     laser_px: tuple[float, float] | None = None
@@ -446,7 +542,8 @@ def calibrate(ser: Transport, cap: cv2.VideoCapture, auto: bool = False) -> dict
         if auto:
             # Wait for laser to be visible, then auto-refine immediately
             for _ in range(150):  # ~5s at 30fps
-                send_angles(ser, pan, tilt, seq, laser_on=True); seq += 1
+                send_angles(ser, pan, tilt, seq, laser_on=True)
+                seq += 1
                 ret, frame = cap.read()
                 if not ret:
                     time.sleep(0.01)
@@ -459,8 +556,18 @@ def calibrate(ser: Transport, cap: cv2.VideoCapture, auto: bool = False) -> dict
                     cv2.waitKey(1)
                     print(f"  Laser found at ({laser_px[0]:.0f}, {laser_px[1]:.0f})")
                     pan, tilt, seq = _auto_refine(
-                        ser, cap, detector, pan, tilt, seq,
-                        cx_target, cy_target, fx_approx, pan_sign, tilt_sign, win,
+                        ser,
+                        cap,
+                        detector,
+                        pan,
+                        tilt,
+                        seq,
+                        cx_target,
+                        cy_target,
+                        fx_approx,
+                        pan_sign,
+                        tilt_sign,
+                        win,
                     )
                     label = "DONE"
                     break
@@ -473,7 +580,8 @@ def calibrate(ser: Transport, cap: cv2.VideoCapture, auto: bool = False) -> dict
         else:
             # Manual jog loop
             while True:
-                send_angles(ser, pan, tilt, seq, laser_on=True); seq += 1
+                send_angles(ser, pan, tilt, seq, laser_on=True)
+                seq += 1
 
                 ret, frame = cap.read()
                 if not ret:
@@ -501,8 +609,18 @@ def calibrate(ser: Transport, cap: cv2.VideoCapture, auto: bool = False) -> dict
                         print("  No laser detected. Make sure the laser is on and visible.")
                         continue
                     pan, tilt, seq = _auto_refine(
-                        ser, cap, detector, pan, tilt, seq,
-                        cx_target, cy_target, fx_approx, pan_sign, tilt_sign, win,
+                        ser,
+                        cap,
+                        detector,
+                        pan,
+                        tilt,
+                        seq,
+                        cx_target,
+                        cy_target,
+                        fx_approx,
+                        pan_sign,
+                        tilt_sign,
+                        win,
                     )
                     label = "DONE"
                     print(f"  Auto-refine complete: pan={pan:+.3f}  tilt={tilt:+.3f}")
@@ -552,7 +670,8 @@ def _auto_refine(
 
         # Try HSV first (fast)
         if hsv_miss_streak < HSV_MISS_FALLBACK:
-            send_angles(ser, pan, tilt, seq, laser_on=True); seq += 1
+            send_angles(ser, pan, tilt, seq, laser_on=True)
+            seq += 1
             ret, frame = cap.read()
             if ret:
                 result = detector.detect(frame, roi_center=None)
@@ -571,7 +690,8 @@ def _auto_refine(
             if detection is not None:
                 hsv_miss_streak = 0
                 # Grab a frame for display
-                send_angles(ser, pan, tilt, seq, laser_on=True); seq += 1
+                send_angles(ser, pan, tilt, seq, laser_on=True)
+                seq += 1
                 ret, frame = cap.read()
                 if not ret:
                     frame = None
@@ -588,7 +708,9 @@ def _auto_refine(
 
         # Show live feedback
         if frame is not None:
-            cv2.imshow(win, draw_center_ui(frame, pan, tilt, detection, (ex, ey), f"AUTO {i+1}/{max_iter}"))
+            cv2.imshow(
+                win, draw_center_ui(frame, pan, tilt, detection, (ex, ey), f"AUTO {i+1}/{max_iter}")
+            )
             cv2.waitKey(1)
 
         if err_mag < threshold_px:
@@ -647,6 +769,7 @@ def reset_offsets(ser: Transport) -> bool:
 #  Camera / Transport / Main
 # ═══════════════════════════════════════════════════════════════════════
 
+
 def open_transport(args: argparse.Namespace) -> Transport:
     return SerialTransport(args.port, args.baud)
 
@@ -696,7 +819,9 @@ def main() -> None:
     parser.add_argument("--baud", type=int, default=921600, help="Baud rate")
     parser.add_argument("--source", default="0", help="Camera source")
     parser.add_argument("--backend", default="auto", choices=("dshow", "msmf", "ffmpeg", "auto"))
-    parser.add_argument("--auto", action="store_true", help="Skip manual jog, auto-converge immediately")
+    parser.add_argument(
+        "--auto", action="store_true", help="Skip manual jog, auto-converge immediately"
+    )
     parser.add_argument("--reset", action="store_true", help="Reset all offsets to zero and exit")
     args = parser.parse_args()
 
