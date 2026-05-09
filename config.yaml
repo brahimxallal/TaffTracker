@@ -26,7 +26,7 @@ comms:
   channel: auto          # auto | serial | udp  (auto: try serial first, fallback UDP)
   serial_port: COM4
   baud_rate: 921600
-  udp_host: 192.168.1.13   # ESP32 IP on ZORGATI_2.4GHz (MAC 98:88:e0 = Espressif)
+  udp_host: 192.168.1.19   # ESP32 IP on the local 2.4 GHz network
   udp_port: 6000
   udp_redundancy: 1         # Send each packet N times (1 = no redundancy, 2 = duplicate)
   enabled: true
@@ -73,17 +73,15 @@ runtime:
 
 # --- Servo / Output Controller ---
 # Tuning that lives in the OutputProcess (controller, lead, smoother).
-# Defaults preserve current live behaviour — only flip flags after live
-# tuning. See src/output/velocity_smoother.py for the activation policy.
+# Defaults preserve the current tuned live behaviour. See
+# src/output/velocity_smoother.py for the activation policy.
 servo_control:
   manual_response_velocity_floor_dps: 80.0
   derivative_filter_alpha: 0.35
-  # Velocity smoother for predictive lead. Off by default — flip to true
-  # AFTER running scripts/analyze_velocity_smoother.py and reading
-  # docs/TUNING.md. Defaults below match the analyzer's recommendation
-  # for typical Kalman noise (alpha=0.5 = ~40% noise reduction with
-  # one-frame lag at 60 fps).
-  velocity_smoother_enabled: false
+  # Velocity smoother for predictive lead. Enabled after live tuning; defaults
+  # below match the analyzer's recommendation for typical Kalman noise
+  # (alpha=0.5 = ~40% noise reduction with one-frame lag at 60 fps).
+  velocity_smoother_enabled: true
   velocity_smoother_alpha: 0.5         # EMA blend; lower = smoother, more lag
   velocity_smoother_deadband_dps: 5.0  # below this, smoothed velocity reads 0
   velocity_smoother_slew_dps_per_s: 0.0  # 0 = no slew cap (recommended start)

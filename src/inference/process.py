@@ -36,7 +36,6 @@ from src.inference.stages.centroid import CentroidStage
 from src.inference.stages.servo import ServoStage
 from src.inference.stages.tracker import TrackerStage
 from src.inference.telemetry import format_profiler_summary, write_profiler_summary
-from src.inference.trt_engine import TRTEngine
 from src.shared.pose_schema import PoseSchema
 from src.shared.profiler import StageProfiler
 from src.shared.ring_buffer import RingBufferLayout, SharedRingBuffer
@@ -116,6 +115,9 @@ class InferenceProcess(mp.Process):
 
         # ── Component construction (child process) ──
         ring_buffer = SharedRingBuffer.attach(self._layout, self._write_index)
+        # ARIA: Keep TensorRT imports in the child startup path so CLI/help can run without TRT.
+        from src.inference.trt_engine import TRTEngine
+
         engine = TRTEngine(self._resolve_engine_path())
         camera_model = self._load_camera_model()
         pose_schema = self._load_pose_schema()

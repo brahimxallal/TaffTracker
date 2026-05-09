@@ -312,6 +312,12 @@ def build_config_from_yaml(
         integral_decay_rate=float(gimbal_cfg.get("integral_decay_rate", 1.0)),
         slew_limit_dps=float(gimbal_cfg.get("slew_limit_dps", 25.0)),
         tilt_scale=float(gimbal_cfg.get("tilt_scale", 0.45)),
+        # ARIA: Load all controller tuning keys so config.yaml matches runtime behavior.
+        velocity_feedforward_gain=float(gimbal_cfg.get("velocity_feedforward_gain", 0.0)),
+        kp_far=(float(gimbal_cfg["kp_far"]) if gimbal_cfg.get("kp_far") is not None else None),
+        kp_near=(float(gimbal_cfg["kp_near"]) if gimbal_cfg.get("kp_near") is not None else None),
+        gain_schedule_threshold_deg=float(gimbal_cfg.get("gain_schedule_threshold_deg", 3.0)),
+        predictive_lead_s=float(gimbal_cfg.get("predictive_lead_s", 0.0)),
     )
 
     paths = RuntimePaths(workspace_root=Path.cwd())

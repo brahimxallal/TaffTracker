@@ -84,6 +84,30 @@ class TestConfigLoader:
         assert config.gimbal.invert_pan is False
         assert config.gimbal.invert_tilt is True
 
+    def test_gimbal_extended_tuning_from_yaml(self):
+        yaml_data = {
+            "gimbal": {
+                "velocity_feedforward_gain": 0.5,
+                "kp_far": 5.0,
+                "kp_near": 1.5,
+                "gain_schedule_threshold_deg": 3.0,
+                "predictive_lead_s": 0.08,
+            }
+        }
+
+        config = build_config_from_yaml(yaml_data)
+
+        assert config.gimbal.velocity_feedforward_gain == 0.5
+        assert config.gimbal.kp_far == 5.0
+        assert config.gimbal.kp_near == 1.5
+        assert config.gimbal.gain_schedule_threshold_deg == 3.0
+        assert config.gimbal.predictive_lead_s == 0.08
+
+    def test_ffmpeg_backend_from_yaml_is_valid(self):
+        config = build_config_from_yaml({"camera": {"backend": "ffmpeg"}})
+
+        assert config.camera.backend == "ffmpeg"
+
     def test_gimbal_defaults_when_missing(self):
         config = build_config_from_yaml({})
         assert config.gimbal.invert_pan is False

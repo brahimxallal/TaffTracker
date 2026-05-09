@@ -9,7 +9,7 @@ Mode = Literal["camera", "video"]
 TargetKind = Literal["human", "dog"]
 CommChannel = Literal["serial", "udp", "auto"]
 Precision = Literal["fp16", "int8"]
-Backend = Literal["auto", "msmf", "dshow"]
+Backend = Literal["auto", "msmf", "dshow", "ffmpeg"]
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
 
 
