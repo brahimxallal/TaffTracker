@@ -22,7 +22,7 @@ Expect ~30 minutes on a clean machine with CUDA already installed.
 - USB camera or phone-as-webcam (1080p60 recommended)
 - ESP32-S3 board (tested: ESP32-S3-N16R8)
 - Two MG996R servos (pan + tilt) + external 5–6 V power supply
-- Optional: red laser diode for closed-loop visual servoing
+- Optional: red laser diode for boresight calibration
 
 ### Firmware toolchain
 - [PlatformIO Core](https://docs.platformio.org/en/latest/core/installation/index.html) or ESP-IDF 5.x
@@ -94,7 +94,7 @@ known distance is fine — see ["Measuring camera HFOV"](#measuring-camera-hfov)
 and set it in `config.yaml`:
 ```yaml
 camera:
-  hfov_deg: 66.2      # phone camera example; set to your camera's value
+  fov: 66.2           # phone camera example; set to your camera's value
 ```
 `CameraModel.from_fov()` computes focal length as `fx = (width/2) / tan(hfov/2)`.
 
@@ -104,12 +104,12 @@ camera:
 > mount, and the FOV-only path is accurate enough for sub-degree
 > aiming at the working distances we hit in practice.
 
-### 5.2 Laser boresight (visual-servo mode only)
-Paint a dot on a wall at ~2 m, engage the laser, point the gimbal at the dot, then:
+### 5.2 Laser boresight
+Use the interactive calibrator to align the laser with the optical center and persist the measured offset:
 ```bash
-python scripts/laser_capture.py
+python scripts/calibrate.py --port COM4
 ```
-Records the pixel offset between optical center and laser impact. Stored in `calibration_data/laser_boresight.json`.
+`scripts/laser_capture.py` is only a diagnostic helper that saves `logs/laser_frame.png` and prints HSV values for threshold tuning.
 
 ### 5.3 Gimbal center calibration
 Align the laser with the optical center and persist servo offsets to ESP32 NVS:
@@ -149,7 +149,7 @@ cd firmware/esp32s3_gimbal
 pio run -t upload --upload-port COM4        # Windows
 pio run -t upload --upload-port /dev/ttyACM0  # Linux
 ```
-First boot writes servo defaults to NVS. Watch the serial console (`pio device monitor`) to confirm the pan/tilt servos sweep through their calibration range.
+On boot the firmware loads saved NVS offsets when present, otherwise it uses compile-time defaults. Watch the serial console (`pio device monitor`) to confirm USB/WiFi startup and control-loop health.
 
 **Troubleshooting:**
 - `Error: Unable to find platform 'espressif32'` → `pio pkg install -g --platform espressif32`
@@ -197,6 +197,6 @@ CUDA-dependent tests are skipped automatically via `tests/conftest.py` when TRT 
 
 - **Tune for your scene:** edit `config.yaml` — thresholds, Kalman R/Q, smoothing alphas, gimbal limits.
 - **Add a new target class:** define a `PoseSchema` in `src/shared/pose_schema.py`, add weights + engine, extend `default_tracking_config()`.
-- **Swap transport:** set `comms.transport: auto` / `serial` / `udp` in `config.yaml`.
+- **Swap transport:** set `comms.channel: auto` / `serial` / `udp` in `config.yaml`.
 
 For architecture details see [AGENTS.md](../AGENTS.md). For contribution guidelines see [CONTRIBUTING.md](../CONTRIBUTING.md).

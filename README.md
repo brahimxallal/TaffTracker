@@ -9,7 +9,7 @@ PC-side latency, sub-50 ms system latency including servo travel.
 - 3-process pipeline (Capture → Inference → Output) with lock-free shared memory
 - Ultralytics YOLO26n pose models (human 17-kp, dog 24-kp) exported to TensorRT FP16
 - Adaptive Kalman filter with innovation gating and OC-SORT observation-replay
-- Optional laser-guided visual servoing (closed-loop PID)
+- Optional laser boresight calibration and laser-dot overlay
 - ESP32-S3 firmware: 200 Hz FreeRTOS control loop, USB + WiFi UDP transports
 
 ## Hardware
@@ -17,7 +17,7 @@ PC-side latency, sub-50 ms system latency including servo travel.
 - NVIDIA GPU with TensorRT-compatible drivers (tested on GTX 1650 SUPER, CUDA 12)
 - USB camera or phone-as-webcam (1080p60 recommended)
 - ESP32-S3 board + two MG996R servos + power supply
-- Optional: laser diode for visual-servo mode
+- Optional: laser diode for boresight calibration
 
 ## Quick start
 
@@ -44,8 +44,8 @@ src/
   capture/             camera read + letterbox
   inference/           TRT YOLO + tracker + Kalman
   output/              serial / UDP transport + visualizer
-  tracking/            Kalman, ByteTrack, BoT-SORT, 1€ filter, visual servo
-  calibration/         pinhole model, depth, laser boresight
+  tracking/            Kalman, ByteTrack, BoT-SORT, 1€ filter
+  calibration/         pinhole model and laser boresight
   laser/               HSV laser-dot detector
   shared/              ring buffer, display buffer, protocol, types
 firmware/esp32s3_gimbal/   ESP-IDF firmware (200 Hz control loop)

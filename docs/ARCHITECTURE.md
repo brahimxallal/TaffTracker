@@ -83,7 +83,7 @@ The output is a `TrackingMessage` (`src/shared/types.py`) carrying servo angles,
 - Auto-mode controller (`src/output/auto_controller.py`) is a pure function over `(message, state, config)`: gain-scheduled PD, predictive lead, slew cap, integral decay, deadband, mechanical-limit clamp.
 - Manual-mode controller (`src/ui/manual_keyboard.py`) uses ZQSD = fine speed, arrows = coarse speed, with deterministic acceleration ramping and a clock injection point for unit tests.
 - Transport selection (`src/output/sender_factory.py`): `serial`, `udp`, or `auto` with health probing. Both transports report health so the main process can flip between them transparently.
-- Protocol v2 (`src/shared/protocol.py`): 20-byte little-endian frame with sync byte 0xBB, target angles, angular velocity, tracker state flags, quality, latency. CRC checksum over the body.
+- Protocol v2 (`src/shared/protocol.py`): 21-byte little-endian frame with sync byte 0xBB, target angles, angular velocity, tracker state flags, quality, latency. CRC checksum over the body.
 
 Sign inversion is applied **only at output encoding**, not in the Kalman state, so the internal pipeline stays sign-agnostic and the same models work on flipped mounts.
 
