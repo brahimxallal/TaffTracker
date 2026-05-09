@@ -42,9 +42,12 @@ engines/*.onnx
 # --- Models (large, tracked via LFS or downloaded) ---
 models/*.pt
 models/**/*.pt
+models/*.cache
+models/**/*.cache
 
 # --- Calibration data (generated per-camera) ---
 calibration_data/*.npz
+calibration_data/int8_calib.yaml
 calibration_data/int8_calib/
 calibration_data/servo_limits.json
 
@@ -89,6 +92,7 @@ firmware/**/*.env
 # --- Large/ephemeral artifacts ---
 backup_pre_refactor_*.tar
 calibration_data/*.png
+plans/
 
 # --- Misc ---
 *.bak

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import argparse
-from pathlib import Path
 import logging
+import os
 import shutil
+from pathlib import Path
 
 from ultralytics import YOLO
-
 
 LOGGER = logging.getLogger("export_engines")
 
@@ -57,9 +57,11 @@ def parse_args() -> argparse.Namespace:
 def _write_calib_yaml(calib_dir: Path) -> Path:
     """Write a YAML dataset file that Ultralytics uses for INT8 calibration."""
     yaml_path = calib_dir.parent / f"{calib_dir.name}.yaml"
+    # ARIA: Keep generated dataset YAML portable instead of embedding a local absolute path.
+    calib_path = os.path.relpath(calib_dir.resolve(), start=yaml_path.parent.resolve())
     yaml_path.write_text(
         f"# Auto-generated INT8 calibration dataset\n"
-        f"path: {calib_dir.resolve()}\n"
+        f"path: {Path(calib_path).as_posix()}\n"
         f"train: images/train\nval: images/train\n"
         f"kpt_shape: [17, 3]\n"
         f"names:\n  0: object\n",
@@ -80,7 +82,9 @@ def _ensure_calibration_images(
         LOGGER.info("Using existing calibration dataset: %s (%d images)", img_dir, len(existing))
         return _write_calib_yaml(calib_dir)
 
-    LOGGER.info("Generating INT8 calibration dataset from camera (source=%s, frames=%d)", source, num_frames)
+    LOGGER.info(
+        "Generating INT8 calibration dataset from camera (source=%s, frames=%d)", source, num_frames
+    )
     img_dir.mkdir(parents=True, exist_ok=True)
     lbl_dir.mkdir(parents=True, exist_ok=True)
 
@@ -196,7 +200,6 @@ def main() -> None:
     # Resolve calibration data for INT8
     calib_data: Path | None = None
     if args.precision == "int8":
-        import numpy as np  # noqa: F811 — needed for calibration capture
 
         if args.calib_images is not None:
             calib_data = args.calib_images.resolve()
@@ -205,7 +208,9 @@ def main() -> None:
             calib_data = _write_calib_yaml(calib_data)
         else:
             calib_dir = workspace / "calibration_data" / "int8_calib"
-            calib_data = _ensure_calibration_images(calib_dir, num_frames=args.calib_frames, imgsz=args.imgsz)
+            calib_data = _ensure_calibration_images(
+                calib_dir, num_frames=args.calib_frames, imgsz=args.imgsz
+            )
 
     exports: list[Path] = []
     targets = [args.target] if args.target != "all" else ["human", "dog"]
@@ -216,8 +221,11 @@ def main() -> None:
             raise FileNotFoundError(f"Model not found: {model_path}")
 
         exported_path = export_model(
-            model_path, imgsz=args.imgsz, device=args.device,
-            precision=args.precision, calib_data=calib_data,
+            model_path,
+            imgsz=args.imgsz,
+            device=args.device,
+            precision=args.precision,
+            calib_data=calib_data,
         )
 
         engine_name = _engine_name(engine_base, args.precision)
@@ -232,7 +240,9 @@ def main() -> None:
                 LOGGER.info("Removed intermediate ONNX %s", onnx_path.name)
         exports.append(destination)
 
-    LOGGER.info("Export complete (%s): %s", args.precision.upper(), ", ".join(path.name for path in exports))
+    LOGGER.info(
+        "Export complete (%s): %s", args.precision.upper(), ", ".join(path.name for path in exports)
+    )
 
 
 if __name__ == "__main__":
