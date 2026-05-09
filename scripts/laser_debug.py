@@ -6,6 +6,7 @@ Shows 4 panels:
 
 Reads laser thresholds from config.yaml automatically.
 """
+
 import sys
 from pathlib import Path
 
@@ -17,7 +18,7 @@ import yaml
 _CONFIG_PATH = Path(__file__).resolve().parent.parent / "config.yaml"
 _laser_cfg: dict = {}
 if _CONFIG_PATH.exists():
-    with open(_CONFIG_PATH, "r", encoding="utf-8") as f:
+    with open(_CONFIG_PATH, encoding="utf-8") as f:
         _data = yaml.safe_load(f)
         if isinstance(_data, dict):
             _laser_cfg = _data.get("laser", {})
@@ -99,14 +100,30 @@ while True:
     raw_mask_display = cv2.cvtColor(raw_mask, cv2.COLOR_GRAY2BGR)
 
     # Add text overlays
-    cv2.putText(display, f"V>={VAL_MIN} S>={SAT_MIN} Blobs:{blob_count}", (10, 25),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-    cv2.putText(v_display, "Value (brightness)", (10, 25),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-    cv2.putText(raw_mask_display, "Red hue mask (raw)", (10, 25),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
-    cv2.putText(info_mask, "Final mask + contours", (10, 25),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+    cv2.putText(
+        display,
+        f"V>={VAL_MIN} S>={SAT_MIN} Blobs:{blob_count}",
+        (10, 25),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        (0, 255, 0),
+        2,
+    )
+    cv2.putText(
+        v_display, "Value (brightness)", (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2
+    )
+    cv2.putText(
+        raw_mask_display,
+        "Red hue mask (raw)",
+        (10, 25),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.6,
+        (0, 255, 0),
+        2,
+    )
+    cv2.putText(
+        info_mask, "Final mask + contours", (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2
+    )
 
     # 2x2 grid
     top = np.hstack([display, v_display])
@@ -116,18 +133,18 @@ while True:
 
     cv2.imshow("Laser Debug (q=quit, +/-=V, s/a=S)", grid)
     key = cv2.waitKey(1) & 0xFF
-    if key == ord('q'):
+    if key == ord("q"):
         break
-    elif key == ord('+') or key == ord('='):
+    elif key == ord("+") or key == ord("="):
         VAL_MIN = min(255, VAL_MIN + 10)
         print(f"  V_min = {VAL_MIN}")
-    elif key == ord('-'):
+    elif key == ord("-"):
         VAL_MIN = max(0, VAL_MIN - 10)
         print(f"  V_min = {VAL_MIN}")
-    elif key == ord('s'):
+    elif key == ord("s"):
         SAT_MIN = min(255, SAT_MIN + 10)
         print(f"  S_min = {SAT_MIN}")
-    elif key == ord('a'):
+    elif key == ord("a"):
         SAT_MIN = max(0, SAT_MIN - 10)
         print(f"  S_min = {SAT_MIN}")
 

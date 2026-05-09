@@ -2,19 +2,23 @@ from __future__ import annotations
 
 import argparse
 import csv
-from datetime import datetime
 import json
 import os
-from pathlib import Path
 import signal
 import subprocess
 import sys
 import time
+from datetime import datetime
+from pathlib import Path
 
 
 def _parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Run a headless tracker benchmark and export summary metrics.")
-    parser.add_argument("--duration", type=float, default=60.0, help="Benchmark duration in seconds")
+    parser = argparse.ArgumentParser(
+        description="Run a headless tracker benchmark and export summary metrics."
+    )
+    parser.add_argument(
+        "--duration", type=float, default=60.0, help="Benchmark duration in seconds"
+    )
     parser.add_argument("--output", type=Path, default=None, help="Output JSON path")
     parser.add_argument("--config", default="config.yaml", help="Path to runtime config")
     parser.add_argument("--mode", choices=("camera", "video"), default=None)
@@ -32,8 +36,7 @@ def _read_profiler_summary(path: Path) -> dict[str, dict[str, float]]:
         for row in reader:
             stage = row.pop("stage")
             result[stage] = {
-                key: float(value) if key != "count" else int(value)
-                for key, value in row.items()
+                key: float(value) if key != "count" else int(value) for key, value in row.items()
             }
     return result
 

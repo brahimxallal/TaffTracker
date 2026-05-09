@@ -1,7 +1,9 @@
 """Capture one frame, analyze HSV values of bright red regions, save diagnostic."""
+
+import sys
+
 import cv2
 import numpy as np
-import sys
 
 cap = cv2.VideoCapture(0)
 if not cap.isOpened():
@@ -52,7 +54,9 @@ for thresh in [250, 230, 200, 180, 150, 120]:
             rh = h[red_mask]
             rs = s[red_mask]
             rv = v[red_mask]
-            print(f"  Red pixels: H=[{rh.min()}-{rh.max()}] S=[{rs.min()}-{rs.max()}] V=[{rv.min()}-{rv.max()}]")
+            print(
+                f"  Red pixels: H=[{rh.min()}-{rh.max()}] S=[{rs.min()}-{rs.max()}] V=[{rv.min()}-{rv.max()}]"
+            )
             # Find centroid of red bright region
             ys, xs = np.where(red_mask)
             cx, cy = int(xs.mean()), int(ys.mean())
