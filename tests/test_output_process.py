@@ -19,6 +19,7 @@ from src.shared.protocol import (
     decode_packet_v2,
 )
 from src.shared.ring_buffer import SharedRingBuffer
+from src.shared.runtime_control import OutputRuntimeTuning
 from src.shared.types import TrackingMessage
 
 
@@ -403,6 +404,35 @@ def test_encode_packet_manual_motion_sets_fast_response_flag() -> None:
     assert not (first_decoded.state & FLAG_FAST_MOTION)
     assert second_decoded.pan_vel == 8000  # boosted to 80°/s floor × 100
     assert second_decoded.state & FLAG_FAST_MOTION
+
+
+@pytest.mark.unit
+def test_output_runtime_tuning_updates_controller_config() -> None:
+    proc = _make_proc()
+    ack = mp.Value("i", 0)
+    proc._control_ack_version = ack  # noqa: SLF001
+
+    proc._apply_runtime_tuning(  # noqa: SLF001
+        OutputRuntimeTuning(
+            version=4,
+            hold_time_s=0.9,
+            gimbal_kp=1.6,
+            gimbal_ki=0.1,
+            gimbal_kd=0.8,
+            gimbal_deadband_deg=0.7,
+            gimbal_slew_limit_dps=55.0,
+            gimbal_kp_near=0.9,
+            gimbal_kp_far=1.8,
+            gimbal_predictive_lead_s=0.03,
+        )
+    )
+
+    assert proc._tracking_config.hold_time_s == pytest.approx(0.9)  # noqa: SLF001
+    assert proc._gimbal_config.kp == pytest.approx(1.6)  # noqa: SLF001
+    assert proc._auto_controller_config.effective_kp_near == pytest.approx(0.9)  # noqa: SLF001
+    assert proc._auto_controller_config.effective_kp_far == pytest.approx(1.8)  # noqa: SLF001
+    assert proc._auto_controller_config.slew_limit_dps == pytest.approx(55.0)  # noqa: SLF001
+    assert ack.value == 4
 
 
 # --- _center_message servo field tests ---
