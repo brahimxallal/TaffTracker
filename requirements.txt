@@ -11,6 +11,7 @@
 # --- Core ---
 numpy>=2.0,<3.0
 opencv-python>=4.13,<5.0
+av>=16.0,<17.0
 PyYAML>=6.0,<7.0
 scipy>=1.16,<2.0
 

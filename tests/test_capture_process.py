@@ -7,7 +7,7 @@ import numpy as np
 import pytest
 
 from src.capture.process import CaptureProcess
-from src.config import CameraConfig
+from src.config import CameraConfig, DroidCamConfig, PhoneCameraConfig
 from src.shared.ring_buffer import SharedRingBuffer
 
 
@@ -245,6 +245,7 @@ class _MockVideoCapture:
         native_h: int = 480,
         fps: float = 30.0,
         backend_name: str = "MSMF",
+        read_results: list[tuple[bool, np.ndarray | None]] | None = None,
     ):
         self._opens = opens
         self._props = {
@@ -253,7 +254,9 @@ class _MockVideoCapture:
             cv2.CAP_PROP_FPS: fps,
         }
         self._backend_name = backend_name
+        self._read_results = list(read_results) if read_results is not None else None
         self.released = False
+        self.read_calls = 0
         self.set_calls: list[tuple[int, float]] = []
 
     def isOpened(self) -> bool:
@@ -268,6 +271,16 @@ class _MockVideoCapture:
 
     def getBackendName(self) -> str:
         return self._backend_name
+
+    def read(self):
+        self.read_calls += 1
+        if self._read_results is not None:
+            if self._read_results:
+                return self._read_results.pop(0)
+            return False, None
+        height = int(self._props[cv2.CAP_PROP_FRAME_HEIGHT])
+        width = int(self._props[cv2.CAP_PROP_FRAME_WIDTH])
+        return True, np.zeros((height, width, 3), dtype=np.uint8)
 
     def release(self) -> None:
         self.released = True
@@ -362,6 +375,264 @@ def test_open_capture_fails_all_backends(monkeypatch) -> None:
 
     with pytest.raises(RuntimeError, match="Failed to open capture source"):
         process._open_capture()
+
+
+@pytest.mark.unit
+def test_open_capture_rejects_backend_that_produces_no_frames(monkeypatch) -> None:
+    dead_cap = _MockVideoCapture(opens=True, read_results=[(False, None)] * 8)
+    live_cap = _MockVideoCapture(opens=True, backend_name="DSHOW")
+
+    def fake_video_capture(src, backend):
+        if backend == cv2.CAP_MSMF:
+            return dead_cap
+        return live_cap
+
+    monkeypatch.setattr(cv2, "VideoCapture", fake_video_capture)
+    monkeypatch.setattr("src.capture.process.time.sleep", lambda s: None)
+    process = _build_capture_process(source="0")
+
+    result = process._open_capture()
+
+    assert result is live_cap
+    assert dead_cap.released
+    assert dead_cap.read_calls == 8
+
+
+@pytest.mark.unit
+def test_open_capture_uses_phone_yuv_source_without_waiting_for_frame(monkeypatch) -> None:
+    created_configs = []
+
+    class _FakePhoneSource:
+        def __init__(self, config):
+            created_configs.append(config)
+            self.released = False
+
+        def isOpened(self):
+            return True
+
+        def release(self):
+            self.released = True
+
+    monkeypatch.setattr("src.capture.process.PhoneYuvCaptureSource", _FakePhoneSource)
+    process = _build_capture_process(
+        source="0",
+        camera_config=CameraConfig(
+            width=640,
+            height=640,
+            fps=60,
+            source_backend="phone_yuv",
+        ),
+        phone_camera_config=PhoneCameraConfig(
+            bind_host="127.0.0.1",
+            frame_port=28001,
+            control_port=28002,
+            width=640,
+            height=480,
+            fps=60,
+            capture_mode="auto",
+            focus_diopters=0.8,
+            torch_enabled=True,
+            adb_reverse_enabled=False,
+        ),
+    )
+
+    result = process._open_capture()
+
+    assert isinstance(result, _FakePhoneSource)
+    assert len(created_configs) == 1
+    runtime = created_configs[0]
+    assert runtime.frame_host == "127.0.0.1"
+    assert runtime.frame_port == 28001
+    assert runtime.control_port == 28002
+    assert runtime.requested_width == 640
+    assert runtime.requested_height == 480
+    assert runtime.requested_fps == 60.0
+    assert runtime.adb_reverse is False
+    assert runtime.startup_controls["capture_mode"] == "auto"
+    assert runtime.startup_controls["focus_diopters"] == 0.8
+    assert runtime.startup_controls["torch_enabled"] is True
+
+
+@pytest.mark.unit
+def test_open_capture_uses_phone_mpeg_source_without_waiting_for_frame(monkeypatch) -> None:
+    created_configs = []
+
+    class _FakePhoneMpegSource:
+        def __init__(self, config):
+            created_configs.append(config)
+            self.released = False
+
+        def isOpened(self):
+            return True
+
+        def release(self):
+            self.released = True
+
+    monkeypatch.setattr("src.capture.process.PhoneMpegCaptureSource", _FakePhoneMpegSource)
+    process = _build_capture_process(
+        source="0",
+        camera_config=CameraConfig(
+            width=640,
+            height=640,
+            fps=60,
+            source_backend="phone_mpeg",
+        ),
+        phone_camera_config=PhoneCameraConfig(
+            bind_host="127.0.0.1",
+            frame_port=28001,
+            control_port=28002,
+            width=640,
+            height=480,
+            fps=60,
+            codec="mpeg4",
+            bitrate_bps=6_000_000,
+            keyframe_interval_s=0.0,
+            capture_mode="auto",
+            focus_diopters=0.8,
+            torch_enabled=True,
+            adb_reverse_enabled=False,
+        ),
+    )
+
+    result = process._open_capture()
+
+    assert isinstance(result, _FakePhoneMpegSource)
+    assert len(created_configs) == 1
+    runtime = created_configs[0]
+    assert runtime.frame_host == "127.0.0.1"
+    assert runtime.frame_port == 28001
+    assert runtime.control_port == 28002
+    assert runtime.requested_width == 640
+    assert runtime.requested_height == 480
+    assert runtime.requested_fps == 60.0
+    assert runtime.codec == "mpeg4"
+    assert runtime.bitrate_bps == 6_000_000
+    assert runtime.keyframe_interval_s == 0.0
+    assert runtime.adb_reverse is False
+    assert runtime.startup_controls["stream_format"] == "mpeg"
+    assert runtime.startup_controls["codec"] == "mpeg4"
+    assert runtime.startup_controls["bitrate_bps"] == 6_000_000
+    assert runtime.startup_controls["keyframe_interval_s"] == 0.0
+    assert runtime.startup_controls["capture_mode"] == "auto"
+    assert runtime.startup_controls["focus_diopters"] == 0.8
+    assert runtime.startup_controls["torch_enabled"] is True
+
+
+@pytest.mark.unit
+def test_open_capture_treats_phone_h264_as_encoded_source(monkeypatch) -> None:
+    created_configs = []
+
+    class _FakePhoneMpegSource:
+        def __init__(self, config):
+            created_configs.append(config)
+            self.released = False
+
+        def isOpened(self):
+            return True
+
+        def release(self):
+            self.released = True
+
+    monkeypatch.setattr("src.capture.process.PhoneMpegCaptureSource", _FakePhoneMpegSource)
+    process = _build_capture_process(
+        source="0",
+        camera_config=CameraConfig(
+            width=640,
+            height=640,
+            fps=60,
+            source_backend="phone_h264",
+        ),
+        phone_camera_config=PhoneCameraConfig(
+            width=640,
+            height=480,
+            fps=60,
+            codec="mpeg4",
+            adb_reverse_enabled=False,
+        ),
+    )
+
+    result = process._open_capture()
+
+    assert isinstance(result, _FakePhoneMpegSource)
+    assert len(created_configs) == 1
+    runtime = created_configs[0]
+    assert runtime.codec == "h264"
+    assert runtime.startup_controls["stream_format"] == "mpeg"
+    assert runtime.startup_controls["codec"] == "h264"
+
+
+@pytest.mark.unit
+def test_open_capture_applies_droidcam_controls_for_opencv(monkeypatch) -> None:
+    mock_cap = _MockVideoCapture(opens=True, native_w=640, native_h=480, fps=60.0)
+    monkeypatch.setattr(cv2, "VideoCapture", lambda src, backend: mock_cap)
+    applied = []
+
+    monkeypatch.setattr(
+        "src.capture.process.apply_droidcam_startup_controls",
+        lambda config: applied.append(config),
+    )
+
+    config = DroidCamConfig(remote_enabled=True, host="192.168.1.16", exposure_lock=True)
+    process = _build_capture_process(source="0", droidcam_config=config)
+
+    result = process._open_capture()
+
+    assert result is mock_cap
+    assert applied == [config]
+
+
+@pytest.mark.unit
+def test_open_capture_uses_droidcam_direct_source(monkeypatch) -> None:
+    created_configs = []
+    applied = []
+
+    class _FakeDroidCamSource:
+        def __init__(self, config):
+            created_configs.append(config)
+            self.released = False
+
+        def isOpened(self):
+            return True
+
+        def release(self):
+            self.released = True
+
+    monkeypatch.setattr("src.capture.process.DroidCamDirectCaptureSource", _FakeDroidCamSource)
+    monkeypatch.setattr(
+        "src.capture.process.apply_droidcam_startup_controls",
+        lambda config: applied.append(config),
+    )
+    droidcam_config = DroidCamConfig(
+        host="10.0.0.20",
+        port=4748,
+        width=1280,
+        height=720,
+        fps=60,
+        video_format="mjpg",
+        remote_enabled=True,
+    )
+    process = _build_capture_process(
+        source="0",
+        camera_config=CameraConfig(
+            width=640,
+            height=640,
+            fps=60,
+            source_backend="droidcam",
+        ),
+        droidcam_config=droidcam_config,
+    )
+
+    result = process._open_capture()
+
+    assert isinstance(result, _FakeDroidCamSource)
+    assert applied == [droidcam_config]
+    assert len(created_configs) == 1
+    runtime = created_configs[0]
+    assert runtime.host == "10.0.0.20"
+    assert runtime.port == 4748
+    assert runtime.width == 1280
+    assert runtime.height == 720
+    assert runtime.video_format == "mjpg"
 
 
 # --- run() loop tests ---

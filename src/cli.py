@@ -38,6 +38,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fps", type=int, default=None)
     parser.add_argument("--backend", default=None, choices=("auto", "dshow", "msmf", "ffmpeg"))
     parser.add_argument(
+        "--source-backend",
+        default=None,
+        choices=("opencv", "phone_yuv", "phone_mpeg", "phone_h264", "droidcam"),
+        help="Capture source implementation for the next run",
+    )
+    parser.add_argument(
         "--confidence", type=float, default=None, help="Override default confidence threshold"
     )
     parser.add_argument(
