@@ -276,6 +276,45 @@ def test_startup_controls_include_codec() -> None:
 
 
 @pytest.mark.unit
+def test_start_phone_app_runs_after_mpeg_listeners_are_ready(monkeypatch) -> None:
+    launches = []
+
+    def fake_start_taffcam_app(config, controls):
+        launches.append((config, controls))
+
+    monkeypatch.setattr("src.capture.phone_mpeg.start_taffcam_app", fake_start_taffcam_app)
+
+    source = PhoneMpegCaptureSource(
+        PhoneMpegRuntimeConfig(
+            frame_port=0,
+            control_port=0,
+            requested_width=640,
+            requested_height=480,
+            requested_fps=60.0,
+            codec="h264",
+            startup_controls={"capture_mode": "auto"},
+            start_phone_app=True,
+        ),
+        decoder=_FakeDecoder(),
+    )
+
+    try:
+        assert source.isOpened()
+    finally:
+        source.release()
+
+    assert len(launches) == 1
+    launch_config, controls = launches[0]
+    assert launch_config.app_package == "com.tafftracker.taffcam"
+    assert controls["width"] == 640
+    assert controls["height"] == 480
+    assert controls["fps"] == 60.0
+    assert controls["stream_format"] == "mpeg"
+    assert controls["codec"] == "h264"
+    assert controls["capture_mode"] == "auto"
+
+
+@pytest.mark.unit
 def test_default_listener_hosts_are_loopback_only() -> None:
     config = PhoneMpegRuntimeConfig(frame_port=0, control_port=0)
     source = PhoneMpegCaptureSource(config, decoder=_FakeDecoder())

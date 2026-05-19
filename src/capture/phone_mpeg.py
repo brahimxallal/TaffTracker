@@ -26,6 +26,7 @@ from src.capture.encoded_protocol import (
     pack_access_unit_packet,
     parse_access_unit_header,
 )
+from src.capture.taffcam_adb import TaffCamLaunchConfig, start_taffcam_app
 
 LOGGER = logging.getLogger(__name__)
 
@@ -81,6 +82,12 @@ class PhoneMpegRuntimeConfig:
     adb_serial: str | None = None
     allow_remote_clients: bool = False
     remove_adb_reverse_on_release: bool = False
+    start_phone_app: bool = False
+    app_package: str = "com.tafftracker.taffcam"
+    app_activity: str = ".MainActivity"
+    app_receiver: str = ".TaffCommandReceiver"
+    app_start_action: str = "com.tafftracker.taffcam.START"
+    app_start_delay_s: float = 1.0
     startup_controls: Mapping[str, Any] = field(default_factory=dict)
 
 
@@ -153,6 +160,7 @@ class PhoneMpegCaptureSource:
         self._recv_buffer = bytearray()
         self._released = False
         self._adb_reverse_started = False
+        self._phone_app_started = False
         self._startup_controls_sent = False
         self._last_header: EncodedAccessUnitHeader | None = None
         self._last_frame_shape: tuple[int, int] | None = None
@@ -247,6 +255,7 @@ class PhoneMpegCaptureSource:
             )
         if self._config.adb_reverse and not self._adb_reverse_started:
             self._start_adb_reverse()
+        self._start_phone_app_once()
 
     def _open_listener(self, host: str, port: int) -> socket.socket:
         _validate_bind_host(host, allow_remote_clients=self._config.allow_remote_clients)
@@ -328,7 +337,7 @@ class PhoneMpegCaptureSource:
             return
         self._startup_controls_sent = True
 
-    def _startup_commands(self) -> list[dict[str, Any]]:
+    def _mode_controls(self) -> dict[str, Any]:
         controls = dict(self._config.startup_controls)
         if self._config.requested_width > 0:
             controls.setdefault("width", self._config.requested_width)
@@ -340,7 +349,10 @@ class PhoneMpegCaptureSource:
         controls.setdefault("codec", self._config.codec)
         controls.setdefault("bitrate_bps", self._config.bitrate_bps)
         controls.setdefault("keyframe_interval_s", self._config.keyframe_interval_s)
+        return controls
 
+    def _startup_commands(self) -> list[dict[str, Any]]:
+        controls = self._mode_controls()
         commands: list[dict[str, Any]] = [
             {
                 "cmd": "set_mode",
@@ -640,6 +652,24 @@ class PhoneMpegCaptureSource:
                 LOGGER.warning("Failed to run adb reverse for phone MPEG port %d: %s", port, exc)
                 return
         self._adb_reverse_started = True
+
+    def _start_phone_app_once(self) -> None:
+        if not self._config.start_phone_app or self._phone_app_started:
+            return
+        self._phone_app_started = True
+        LOGGER.info("Starting TaffCam Android app for phone MPEG stream")
+        start_taffcam_app(
+            TaffCamLaunchConfig(
+                adb_path=self._config.adb_path,
+                adb_serial=self._config.adb_serial,
+                app_package=self._config.app_package,
+                app_activity=self._config.app_activity,
+                app_receiver=self._config.app_receiver,
+                start_action=self._config.app_start_action,
+                start_delay_s=self._config.app_start_delay_s,
+            ),
+            self._mode_controls(),
+        )
 
     def _remove_adb_reverse(self) -> None:
         for port in (self._config.frame_port, self._config.control_port):

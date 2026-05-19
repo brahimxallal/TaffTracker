@@ -562,6 +562,46 @@ def test_open_capture_treats_phone_h264_as_encoded_source(monkeypatch) -> None:
 
 
 @pytest.mark.unit
+def test_phone_h264_open_starts_taffcam_once_when_adb_reverse_is_enabled(monkeypatch) -> None:
+    created_configs = []
+
+    class _FakePhoneMpegSource:
+        def __init__(self, config):
+            created_configs.append(config)
+            self.released = False
+
+        def isOpened(self):
+            return True
+
+        def release(self):
+            self.released = True
+
+    monkeypatch.setattr("src.capture.process.PhoneMpegCaptureSource", _FakePhoneMpegSource)
+    process = _build_capture_process(
+        source="0",
+        camera_config=CameraConfig(
+            width=640,
+            height=640,
+            fps=60,
+            source_backend="phone_h264",
+        ),
+        phone_camera_config=PhoneCameraConfig(
+            width=640,
+            height=480,
+            fps=60,
+            adb_reverse_enabled=True,
+        ),
+    )
+
+    first = process._open_capture()
+    second = process._open_capture()
+
+    assert isinstance(first, _FakePhoneMpegSource)
+    assert isinstance(second, _FakePhoneMpegSource)
+    assert [config.start_phone_app for config in created_configs] == [True, False]
+
+
+@pytest.mark.unit
 def test_open_capture_applies_droidcam_controls_for_opencv(monkeypatch) -> None:
     mock_cap = _MockVideoCapture(opens=True, native_w=640, native_h=480, fps=60.0)
     monkeypatch.setattr(cv2, "VideoCapture", lambda src, backend: mock_cap)

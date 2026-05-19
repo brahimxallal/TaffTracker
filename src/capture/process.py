@@ -57,6 +57,7 @@ class CaptureProcess(mp.Process):
         self._droidcam_config = droidcam_config or DroidCamConfig()
         self._frame_count = 0
         self._last_log_time = time.perf_counter()
+        self._phone_app_start_pending = True
 
     def run(self) -> None:
         import sys
@@ -292,7 +293,10 @@ class CaptureProcess(mp.Process):
             return capture
 
         if self._camera_config.source_backend == "phone_yuv":
-            capture = PhoneYuvCaptureSource(self._build_phone_runtime_config())
+            start_phone_app = self._consume_phone_app_start_request()
+            capture = PhoneYuvCaptureSource(
+                self._build_phone_runtime_config(start_phone_app=start_phone_app)
+            )
             if not capture.isOpened():
                 capture.release()
                 raise RuntimeError("Failed to open TaffCam phone_yuv listener")
@@ -303,7 +307,10 @@ class CaptureProcess(mp.Process):
             )
             return capture
         if self._camera_config.source_backend in _ENCODED_PHONE_BACKENDS:
-            capture = PhoneMpegCaptureSource(self._build_phone_mpeg_runtime_config())
+            start_phone_app = self._consume_phone_app_start_request()
+            capture = PhoneMpegCaptureSource(
+                self._build_phone_mpeg_runtime_config(start_phone_app=start_phone_app)
+            )
             if not capture.isOpened():
                 capture.release()
                 raise RuntimeError(
@@ -407,7 +414,14 @@ class CaptureProcess(mp.Process):
         }
         return startup_controls
 
-    def _build_phone_runtime_config(self) -> PhoneCameraRuntimeConfig:
+    def _consume_phone_app_start_request(self) -> bool:
+        if not self._phone_app_start_pending:
+            return False
+        self._phone_app_start_pending = False
+        phone = self._phone_camera_config
+        return bool(phone.start_app_on_open and phone.adb_reverse_enabled)
+
+    def _build_phone_runtime_config(self, *, start_phone_app: bool = False) -> PhoneCameraRuntimeConfig:
         phone = self._phone_camera_config
         return PhoneCameraRuntimeConfig(
             frame_host=phone.bind_host,
@@ -421,11 +435,16 @@ class CaptureProcess(mp.Process):
             control_timeout_s=phone.control_timeout_s,
             adb_reverse=phone.adb_reverse_enabled,
             adb_path=phone.adb_path,
+            adb_serial=phone.adb_serial,
             allow_remote_clients=phone.allow_remote_clients,
+            start_phone_app=start_phone_app,
+            app_start_delay_s=phone.app_start_delay_s,
             startup_controls=self._build_phone_startup_controls(),
         )
 
-    def _build_phone_mpeg_runtime_config(self) -> PhoneMpegRuntimeConfig:
+    def _build_phone_mpeg_runtime_config(
+        self, *, start_phone_app: bool = False
+    ) -> PhoneMpegRuntimeConfig:
         phone = self._phone_camera_config
         codec = "h264" if self._camera_config.source_backend == "phone_h264" else phone.codec
         return PhoneMpegRuntimeConfig(
@@ -444,7 +463,10 @@ class CaptureProcess(mp.Process):
             control_timeout_s=phone.control_timeout_s,
             adb_reverse=phone.adb_reverse_enabled,
             adb_path=phone.adb_path,
+            adb_serial=phone.adb_serial,
             allow_remote_clients=phone.allow_remote_clients,
+            start_phone_app=start_phone_app,
+            app_start_delay_s=phone.app_start_delay_s,
             startup_controls=self._build_phone_startup_controls(),
         )
 

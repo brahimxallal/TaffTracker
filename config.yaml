@@ -60,6 +60,9 @@ phone_camera:
   control_port: 27184
   adb_reverse_enabled: true
   adb_path: adb
+  adb_serial: null
+  start_app_on_open: true
+  app_start_delay_s: 1.0
   width: 640
   height: 480
   fps: 30                # Infinix Camera2/Camera1 public caps report max 30 FPS for YUV and MediaCodec surfaces

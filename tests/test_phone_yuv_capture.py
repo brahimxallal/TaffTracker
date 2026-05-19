@@ -164,6 +164,42 @@ def test_startup_controls_are_sent_as_command_sequence():
 
 
 @pytest.mark.unit
+def test_start_phone_app_runs_after_yuv_listeners_are_ready(monkeypatch) -> None:
+    launches = []
+
+    def fake_start_taffcam_app(config, controls):
+        launches.append((config, controls))
+
+    monkeypatch.setattr("src.capture.phone_yuv.start_taffcam_app", fake_start_taffcam_app)
+
+    source = PhoneYuvCaptureSource(
+        PhoneCameraRuntimeConfig(
+            frame_port=0,
+            control_port=0,
+            requested_width=640,
+            requested_height=480,
+            requested_fps=60.0,
+            startup_controls={"capture_mode": "auto"},
+            start_phone_app=True,
+        ),
+    )
+
+    try:
+        assert source.isOpened()
+    finally:
+        source.release()
+
+    assert len(launches) == 1
+    launch_config, controls = launches[0]
+    assert launch_config.app_package == "com.tafftracker.taffcam"
+    assert controls["width"] == 640
+    assert controls["height"] == 480
+    assert controls["fps"] == 60.0
+    assert controls["stream_format"] == "yuv"
+    assert controls["capture_mode"] == "auto"
+
+
+@pytest.mark.unit
 def test_release_closes_socket_and_marks_source_closed():
     sender, receiver = _socket_pair()
     source = PhoneYuvCaptureSource.from_socket(receiver)

@@ -295,6 +295,9 @@ class PhoneCameraConfig:
     adb_reverse_enabled: bool = True
     allow_remote_clients: bool = False
     adb_path: str = "adb"
+    adb_serial: str | None = None
+    start_app_on_open: bool = True
+    app_start_delay_s: float = 1.0
     width: int = 640
     height: int = 480
     fps: int = 60
