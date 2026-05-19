@@ -61,7 +61,9 @@ phone_camera:
   adb_reverse_enabled: true
   adb_path: adb
   adb_serial: null
+  adb_reverse_timeout_s: 4.0
   start_app_on_open: true
+  force_stop_app_on_open: true
   app_start_delay_s: 1.0
   width: 640
   height: 480

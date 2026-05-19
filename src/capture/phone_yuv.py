@@ -72,9 +72,11 @@ class PhoneCameraRuntimeConfig:
     adb_reverse: bool = False
     adb_path: str = "adb"
     adb_serial: str | None = None
+    adb_reverse_timeout_s: float = 4.0
     allow_remote_clients: bool = False
     remove_adb_reverse_on_release: bool = False
     start_phone_app: bool = False
+    force_stop_app: bool = False
     app_package: str = "com.tafftracker.taffcam"
     app_activity: str = ".MainActivity"
     app_receiver: str = ".TaffCommandReceiver"
@@ -100,6 +102,7 @@ class PhoneYuvCaptureSource:
         self._recv_buffer = bytearray()
         self._released = False
         self._adb_reverse_started = False
+        self._adb_reverse_attempted = False
         self._phone_app_started = False
         self._startup_controls_sent = False
         self._last_header: FrameHeader | None = None
@@ -480,6 +483,9 @@ class PhoneYuvCaptureSource:
         raise ValueError(f"unsupported phone YUV pixel format: {header.pixel_format}")
 
     def _start_adb_reverse(self) -> None:
+        if self._adb_reverse_attempted:
+            return
+        self._adb_reverse_attempted = True
         for port in (self._config.frame_port, self._config.control_port):
             cmd = [self._config.adb_path]
             if self._config.adb_serial:
@@ -490,7 +496,7 @@ class PhoneYuvCaptureSource:
                     cmd,
                     check=False,
                     capture_output=True,
-                    timeout=2.0,
+                    timeout=self._config.adb_reverse_timeout_s,
                 )
             except (OSError, subprocess.SubprocessError) as exc:
                 LOGGER.warning("Failed to run adb reverse for phone YUV port %d: %s", port, exc)
@@ -511,6 +517,7 @@ class PhoneYuvCaptureSource:
                 app_receiver=self._config.app_receiver,
                 start_action=self._config.app_start_action,
                 start_delay_s=self._config.app_start_delay_s,
+                force_stop_before_start=self._config.force_stop_app,
             ),
             self._mode_controls(),
         )

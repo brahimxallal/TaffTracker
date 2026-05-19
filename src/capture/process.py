@@ -436,8 +436,10 @@ class CaptureProcess(mp.Process):
             adb_reverse=phone.adb_reverse_enabled,
             adb_path=phone.adb_path,
             adb_serial=phone.adb_serial,
+            adb_reverse_timeout_s=phone.adb_reverse_timeout_s,
             allow_remote_clients=phone.allow_remote_clients,
             start_phone_app=start_phone_app,
+            force_stop_app=start_phone_app and phone.force_stop_app_on_open,
             app_start_delay_s=phone.app_start_delay_s,
             startup_controls=self._build_phone_startup_controls(),
         )
@@ -464,8 +466,10 @@ class CaptureProcess(mp.Process):
             adb_reverse=phone.adb_reverse_enabled,
             adb_path=phone.adb_path,
             adb_serial=phone.adb_serial,
+            adb_reverse_timeout_s=phone.adb_reverse_timeout_s,
             allow_remote_clients=phone.allow_remote_clients,
             start_phone_app=start_phone_app,
+            force_stop_app=start_phone_app and phone.force_stop_app_on_open,
             app_start_delay_s=phone.app_start_delay_s,
             startup_controls=self._build_phone_startup_controls(),
         )

@@ -132,3 +132,24 @@ def test_start_taffcam_app_starts_activity_and_broadcasts_controls(monkeypatch) 
     assert calls[3][8:10] == ["-a", "com.tafftracker.taffcam.START"]
     assert calls[2][10:] == calls[3][10:]
     assert sleeps == [0.25]
+
+
+@pytest.mark.unit
+def test_start_taffcam_app_can_force_stop_before_start(monkeypatch) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **_kwargs):
+        calls.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("src.capture.taffcam_adb.subprocess.run", fake_run)
+    monkeypatch.setattr("src.capture.taffcam_adb.time.sleep", lambda _delay: None)
+
+    start_taffcam_app(
+        TaffCamLaunchConfig(force_stop_before_start=True, wake_screen=False),
+        {"stream_format": "mpeg"},
+    )
+
+    assert calls[0] == ["adb", "shell", "am", "force-stop", "com.tafftracker.taffcam"]
+    assert calls[1] == ["adb", "shell", "wm", "dismiss-keyguard"]
+    assert calls[2][:6] == ["adb", "shell", "am", "start", "-n", "com.tafftracker.taffcam/.MainActivity"]

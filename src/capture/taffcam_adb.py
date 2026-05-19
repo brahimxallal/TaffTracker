@@ -40,6 +40,7 @@ class TaffCamLaunchConfig:
     start_action: str = START_ACTION
     start_delay_s: float = 1.0
     command_timeout_s: float = 6.0
+    force_stop_before_start: bool = False
     wake_screen: bool = True
     dismiss_keyguard: bool = True
 
@@ -55,6 +56,13 @@ def build_adb_start_extras(controls: Mapping[str, Any]) -> list[str]:
 
 
 def start_taffcam_app(config: TaffCamLaunchConfig, controls: Mapping[str, Any]) -> None:
+    if config.force_stop_before_start:
+        force_stop = _run_adb(
+            config,
+            ["shell", "am", "force-stop", config.app_package],
+            timeout_s=config.command_timeout_s,
+        )
+        _log_adb_failure("force-stop TaffCam", force_stop)
     if config.wake_screen:
         _run_adb(config, ["shell", "input", "keyevent", "224"], timeout_s=2.0)
     if config.dismiss_keyguard:

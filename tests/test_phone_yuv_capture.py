@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import socket
+import subprocess
 
 import numpy as np
 import pytest
@@ -197,6 +198,35 @@ def test_start_phone_app_runs_after_yuv_listeners_are_ready(monkeypatch) -> None
     assert controls["fps"] == 60.0
     assert controls["stream_format"] == "yuv"
     assert controls["capture_mode"] == "auto"
+
+
+@pytest.mark.unit
+def test_adb_reverse_timeout_is_not_retried_on_every_yuv_listen(monkeypatch) -> None:
+    calls = []
+
+    def fake_run(cmd, **kwargs):
+        calls.append((list(cmd), kwargs))
+        raise subprocess.TimeoutExpired(cmd, timeout=kwargs["timeout"])
+
+    monkeypatch.setattr("src.capture.phone_yuv.subprocess.run", fake_run)
+
+    source = PhoneYuvCaptureSource(
+        PhoneCameraRuntimeConfig(
+            frame_port=0,
+            control_port=0,
+            adb_reverse=True,
+            adb_reverse_timeout_s=4.0,
+        ),
+    )
+
+    try:
+        source._ensure_listening()
+    finally:
+        source.release()
+
+    assert len(calls) == 1
+    assert calls[0][0][-3:] == ["reverse", "tcp:0", "tcp:0"]
+    assert calls[0][1]["timeout"] == 4.0
 
 
 @pytest.mark.unit
