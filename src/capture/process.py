@@ -9,11 +9,25 @@ from traceback import format_exc
 import cv2
 import numpy as np
 
-from src.config import CameraConfig
+from src.capture.droidcam import (
+    DroidCamDirectCaptureSource,
+    DroidCamRuntimeConfig,
+    apply_droidcam_startup_controls,
+)
+from src.capture.phone_mpeg import PhoneMpegCaptureSource, PhoneMpegRuntimeConfig
+from src.capture.phone_yuv import PhoneCameraRuntimeConfig, PhoneYuvCaptureSource
+from src.config import CameraConfig, DroidCamConfig, PhoneCameraConfig
 from src.shared.ring_buffer import RingBufferLayout, SharedRingBuffer
 from src.shared.types import ProcessErrorReport
 
 LOGGER = logging.getLogger("capture")
+
+_LIVE_READ_RETRY_SLEEP_S = 0.005
+_LIVE_READ_REOPEN_THRESHOLD = 30
+_LIVE_REOPEN_BACKOFF_S = 0.25
+_OPEN_VALIDATION_ATTEMPTS = 8
+_OPEN_VALIDATION_SLEEP_S = 0.02
+_ENCODED_PHONE_BACKENDS = ("phone_mpeg", "phone_h264")
 
 
 class CaptureProcess(mp.Process):
@@ -27,6 +41,8 @@ class CaptureProcess(mp.Process):
         shutdown_event: mp.synchronize.Event,
         error_queue: mp.Queue,
         gpu_preprocess: bool = False,
+        phone_camera_config: PhoneCameraConfig | None = None,
+        droidcam_config: DroidCamConfig | None = None,
     ) -> None:
         super().__init__(name="CaptureProcess")
         self._layout = layout
@@ -37,8 +53,11 @@ class CaptureProcess(mp.Process):
         self._shutdown_event = shutdown_event
         self._error_queue = error_queue
         self._gpu_preprocess = gpu_preprocess
+        self._phone_camera_config = phone_camera_config or PhoneCameraConfig()
+        self._droidcam_config = droidcam_config or DroidCamConfig()
         self._frame_count = 0
         self._last_log_time = time.perf_counter()
+        self._phone_app_start_pending = True
 
     def run(self) -> None:
         import sys
@@ -61,8 +80,16 @@ class CaptureProcess(mp.Process):
         try:
             source = self._resolve_source()
             capture = self._open_capture()
-            source_is_file = isinstance(source, str) and Path(source).exists()
+            phone_source = self._camera_config.source_backend in (
+                "phone_yuv",
+                *_ENCODED_PHONE_BACKENDS,
+                "droidcam",
+            )
+            source_is_file = (
+                not phone_source and isinstance(source, str) and Path(source).exists()
+            )
             source_is_stream = isinstance(source, str) and not source_is_file
+            live_source = phone_source or isinstance(source, int) or source_is_stream
             playback_interval_s = self._resolve_playback_interval(capture, source_is_file)
             next_frame_deadline_ns = time.perf_counter_ns()
 
@@ -80,8 +107,25 @@ class CaptureProcess(mp.Process):
             portrait_crop_w = 0
             last_frame_shape: tuple[int, int] | None = None
             frames_since_size_check = 0
+            consecutive_read_failures = 0
+            first_read_failure_ns: int | None = None
 
             while not self._shutdown_event.is_set():
+                if capture is None:
+                    try:
+                        capture = self._open_capture()
+                        lb_ready = False
+                        portrait_crop_w = 0
+                        last_frame_shape = None
+                        frames_since_size_check = 0
+                        consecutive_read_failures = 0
+                        first_read_failure_ns = None
+                        LOGGER.info("Live capture recovered after reopening source")
+                    except RuntimeError as exc:
+                        LOGGER.warning("Live capture reopen failed: %s", exc)
+                        self._shutdown_event.wait(_LIVE_REOPEN_BACKOFF_S)
+                    continue
+
                 if playback_interval_s is not None:
                     now_ns = time.perf_counter_ns()
                     if next_frame_deadline_ns > now_ns:
@@ -90,9 +134,25 @@ class CaptureProcess(mp.Process):
                     next_frame_deadline_ns += int(playback_interval_s * 1_000_000_000.0)
 
                 success, frame = capture.read()
-                if not success:
-                    if isinstance(source, int) or source_is_stream:
-                        time.sleep(0.005)
+                if not success or frame is None:
+                    if live_source:
+                        consecutive_read_failures += 1
+                        if first_read_failure_ns is None:
+                            first_read_failure_ns = time.perf_counter_ns()
+                        if consecutive_read_failures >= _LIVE_READ_REOPEN_THRESHOLD:
+                            stall_ms = (
+                                time.perf_counter_ns() - first_read_failure_ns
+                            ) / 1_000_000.0
+                            LOGGER.warning(
+                                "Live capture stalled for %.0f ms after %d failed reads; reopening source",
+                                stall_ms,
+                                consecutive_read_failures,
+                            )
+                            capture.release()
+                            capture = None
+                            self._shutdown_event.wait(_LIVE_REOPEN_BACKOFF_S)
+                            continue
+                        time.sleep(_LIVE_READ_RETRY_SLEEP_S)
                         continue
                     if source_is_file:
                         replacement = self._rewind_file_capture(capture)
@@ -107,6 +167,13 @@ class CaptureProcess(mp.Process):
                     LOGGER.info("Capture source exhausted; stopping capture loop")
                     self._shutdown_event.set()
                     break
+                if consecutive_read_failures:
+                    LOGGER.info(
+                        "Live capture recovered after %d failed reads",
+                        consecutive_read_failures,
+                    )
+                    consecutive_read_failures = 0
+                    first_read_failure_ns = None
 
                 # Resolution watcher: if the DroidCam user changes resolution
                 # mid-session the shape changes, so we force a letterbox recompute.
@@ -206,18 +273,80 @@ class CaptureProcess(mp.Process):
                 capture.release()
             ring_buffer.close()
 
-    def _open_capture(self) -> cv2.VideoCapture:
+    def _open_capture(self):
+        if self._camera_config.source_backend in ("opencv", "droidcam"):
+            apply_droidcam_startup_controls(self._droidcam_config)
+
+        if self._camera_config.source_backend == "droidcam":
+            capture = DroidCamDirectCaptureSource(
+                DroidCamRuntimeConfig.from_config(self._droidcam_config)
+            )
+            if not capture.isOpened():
+                capture.release()
+                raise RuntimeError("Failed to open DroidCam direct source")
+            LOGGER.info(
+                "Opened DroidCam direct source %s:%d format=%s",
+                self._droidcam_config.host,
+                self._droidcam_config.port,
+                self._droidcam_config.video_format,
+            )
+            return capture
+
+        if self._camera_config.source_backend == "phone_yuv":
+            start_phone_app = self._consume_phone_app_start_request()
+            capture = PhoneYuvCaptureSource(
+                self._build_phone_runtime_config(start_phone_app=start_phone_app)
+            )
+            if not capture.isOpened():
+                capture.release()
+                raise RuntimeError("Failed to open TaffCam phone_yuv listener")
+            LOGGER.info(
+                "Opened TaffCam phone_yuv source on %s:%d",
+                self._phone_camera_config.bind_host,
+                self._phone_camera_config.frame_port,
+            )
+            return capture
+        if self._camera_config.source_backend in _ENCODED_PHONE_BACKENDS:
+            start_phone_app = self._consume_phone_app_start_request()
+            capture = PhoneMpegCaptureSource(
+                self._build_phone_mpeg_runtime_config(start_phone_app=start_phone_app)
+            )
+            if not capture.isOpened():
+                capture.release()
+                raise RuntimeError(
+                    f"Failed to open TaffCam {self._camera_config.source_backend} listener"
+                )
+            LOGGER.info(
+                "Opened TaffCam %s source on %s:%d codec=%s",
+                self._camera_config.source_backend,
+                self._phone_camera_config.bind_host,
+                self._phone_camera_config.frame_port,
+                self._phone_camera_config.codec,
+            )
+            return capture
+
         source = self._resolve_source()
         backends = self._resolve_backends(source)
         last_error: str | None = None
         for backend in backends:
             capture = cv2.VideoCapture(source, backend)
             if capture.isOpened():
-                LOGGER.info("Opened source %s with backend %s", self._source, backend)
                 capture.set(cv2.CAP_PROP_BUFFERSIZE, self._camera_config.buffer_size)
                 capture.set(cv2.CAP_PROP_FRAME_WIDTH, self._camera_config.capture_width)
                 capture.set(cv2.CAP_PROP_FRAME_HEIGHT, self._camera_config.capture_height)
                 capture.set(cv2.CAP_PROP_FPS, self._camera_config.fps)
+
+                if not self._capture_produces_frames(capture, source):
+                    last_error = f"backend {backend} opened but produced no frames"
+                    LOGGER.warning(
+                        "Backend %s opened source %s but produced no frames; trying next backend",
+                        backend,
+                        self._source,
+                    )
+                    capture.release()
+                    continue
+
+                LOGGER.info("Opened source %s with backend %s", self._source, backend)
 
                 # Read back actual camera properties
                 actual_w = int(capture.get(cv2.CAP_PROP_FRAME_WIDTH))
@@ -254,6 +383,110 @@ class CaptureProcess(mp.Process):
             last_error = f"backend {backend} failed"
             LOGGER.debug("Backend %s could not open source %s", backend, self._source)
         raise RuntimeError(f"Failed to open capture source: {self._source} ({last_error})")
+
+    def _build_phone_startup_controls(self) -> dict[str, object]:
+        phone = self._phone_camera_config
+        codec = "h264" if self._camera_config.source_backend == "phone_h264" else phone.codec
+        startup_controls = {
+            "camera_id": phone.camera_id,
+            "width": phone.width,
+            "height": phone.height,
+            "fps": phone.fps,
+            "stream_format": (
+                "mpeg" if self._camera_config.source_backend in _ENCODED_PHONE_BACKENDS else "yuv"
+            ),
+            "pixel_format": phone.pixel_format,
+            "codec": codec,
+            "bitrate_bps": phone.bitrate_bps,
+            "keyframe_interval_s": phone.keyframe_interval_s,
+            "capture_mode": phone.capture_mode,
+            "focus_diopters": phone.focus_diopters,
+            "exposure_ns": phone.exposure_ns,
+            "iso": phone.iso,
+            "awb_enabled": phone.awb_enabled,
+            "awb_lock": phone.awb_lock,
+            "white_balance_kelvin": phone.white_balance_kelvin,
+            "torch_enabled": phone.torch_enabled,
+            "zoom_ratio": phone.zoom_ratio,
+        }
+        startup_controls = {
+            key: value for key, value in startup_controls.items() if value is not None
+        }
+        return startup_controls
+
+    def _consume_phone_app_start_request(self) -> bool:
+        if not self._phone_app_start_pending:
+            return False
+        self._phone_app_start_pending = False
+        phone = self._phone_camera_config
+        return bool(phone.start_app_on_open and phone.adb_reverse_enabled)
+
+    def _build_phone_runtime_config(self, *, start_phone_app: bool = False) -> PhoneCameraRuntimeConfig:
+        phone = self._phone_camera_config
+        return PhoneCameraRuntimeConfig(
+            frame_host=phone.bind_host,
+            frame_port=phone.frame_port,
+            control_host=phone.bind_host,
+            control_port=phone.control_port,
+            requested_width=phone.width,
+            requested_height=phone.height,
+            requested_fps=float(phone.fps),
+            read_timeout_s=phone.read_timeout_s,
+            control_timeout_s=phone.control_timeout_s,
+            adb_reverse=phone.adb_reverse_enabled,
+            adb_path=phone.adb_path,
+            adb_serial=phone.adb_serial,
+            adb_reverse_timeout_s=phone.adb_reverse_timeout_s,
+            allow_remote_clients=phone.allow_remote_clients,
+            start_phone_app=start_phone_app,
+            force_stop_app=start_phone_app and phone.force_stop_app_on_open,
+            app_start_delay_s=phone.app_start_delay_s,
+            startup_controls=self._build_phone_startup_controls(),
+        )
+
+    def _build_phone_mpeg_runtime_config(
+        self, *, start_phone_app: bool = False
+    ) -> PhoneMpegRuntimeConfig:
+        phone = self._phone_camera_config
+        codec = "h264" if self._camera_config.source_backend == "phone_h264" else phone.codec
+        return PhoneMpegRuntimeConfig(
+            frame_host=phone.bind_host,
+            frame_port=phone.frame_port,
+            control_host=phone.bind_host,
+            control_port=phone.control_port,
+            requested_width=phone.width,
+            requested_height=phone.height,
+            requested_fps=float(phone.fps),
+            codec=codec,
+            bitrate_bps=phone.bitrate_bps,
+            keyframe_interval_s=phone.keyframe_interval_s,
+            decode_backend=phone.decode_backend,
+            read_timeout_s=phone.read_timeout_s,
+            control_timeout_s=phone.control_timeout_s,
+            adb_reverse=phone.adb_reverse_enabled,
+            adb_path=phone.adb_path,
+            adb_serial=phone.adb_serial,
+            adb_reverse_timeout_s=phone.adb_reverse_timeout_s,
+            allow_remote_clients=phone.allow_remote_clients,
+            start_phone_app=start_phone_app,
+            force_stop_app=start_phone_app and phone.force_stop_app_on_open,
+            app_start_delay_s=phone.app_start_delay_s,
+            startup_controls=self._build_phone_startup_controls(),
+        )
+
+    def _capture_produces_frames(self, capture, source: int | str) -> bool:
+        if (
+            self._camera_config.source_backend == "opencv"
+            and isinstance(source, str)
+            and Path(source).exists()
+        ):
+            return True
+        for _ in range(_OPEN_VALIDATION_ATTEMPTS):
+            success, frame = capture.read()
+            if success and frame is not None:
+                return True
+            time.sleep(_OPEN_VALIDATION_SLEEP_S)
+        return False
 
     def _resolve_playback_interval(
         self, capture: cv2.VideoCapture, source_is_file: bool

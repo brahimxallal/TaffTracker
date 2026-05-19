@@ -16,6 +16,7 @@ from src.config import (
     GimbalConfig,
     Mode,
     RuntimeFlags,
+    SearchConfig,
     ServoControlConfig,
     TrackingConfig,
 )
@@ -43,6 +44,8 @@ from src.shared.protocol import (
     encode_packet_v2,
 )
 from src.shared.ring_buffer import RingBufferLayout, SharedRingBuffer
+from src.shared.runtime_control import OutputRuntimeTuning
+from src.shared.telemetry import RuntimeTelemetry, put_latest
 from src.shared.types import ProcessErrorReport, TrackingMessage
 
 LOGGER = logging.getLogger("output")
@@ -63,8 +66,12 @@ class OutputProcess(mp.Process):
         flags: RuntimeFlags | None = None,
         gimbal_config: GimbalConfig | None = None,
         servo_control_config: ServoControlConfig | None = None,
+        search_config: SearchConfig | None = None,
         display_queue: mp.Queue | None = None,
         display_buffer_layout: DisplayBufferLayout | None = None,
+        telemetry_queue: mp.Queue | None = None,
+        control_queue: mp.Queue | None = None,
+        control_ack_version: Synchronized | None = None,
         relay_flag: Synchronized | None = None,
         laser_enabled: Synchronized | None = None,
         manual_mode: Synchronized | None = None,
@@ -81,6 +88,9 @@ class OutputProcess(mp.Process):
         self._error_queue = error_queue
         self._display_queue = display_queue
         self._display_buffer_layout = display_buffer_layout
+        self._telemetry_queue = telemetry_queue
+        self._control_queue = control_queue
+        self._control_ack_version = control_ack_version
         self._relay_flag = relay_flag
         self._laser_enabled = laser_enabled
         self._manual_mode = manual_mode
@@ -95,6 +105,7 @@ class OutputProcess(mp.Process):
         self._flags = flags or RuntimeFlags()
         self._gimbal_config = gimbal_config or GimbalConfig()
         self._servo_control_config = servo_control_config or ServoControlConfig()
+        self._search_config = search_config or SearchConfig()
         self._frames_processed = 0
         self._last_log_time = time.perf_counter()
         self._center_pixel = (camera_config.width / 2.0, camera_config.height / 2.0)
@@ -103,7 +114,7 @@ class OutputProcess(mp.Process):
         # plain step function (see src/output/auto_controller.py).
         self._auto_controller_state = AutoControllerState()
         self._auto_controller_config = AutoControllerConfig.from_configs(
-            self._gimbal_config, self._servo_control_config
+            self._gimbal_config, self._servo_control_config, self._search_config
         )
         # Manual-mode velocity history is owned by ManualVelocityTracker.
         self._manual_velocity_tracker = ManualVelocityTracker()
@@ -136,6 +147,44 @@ class OutputProcess(mp.Process):
         if self._laser_boresight_tilt is None:
             return 0.0
         return float(self._laser_boresight_tilt.value)
+
+    def _drain_runtime_controls(self) -> None:
+        if self._control_queue is None:
+            return
+        latest: OutputRuntimeTuning | None = None
+        while True:
+            try:
+                command = self._control_queue.get_nowait()
+            except Empty:
+                break
+            if isinstance(command, OutputRuntimeTuning):
+                latest = command
+        if latest is not None:
+            self._apply_runtime_tuning(latest)
+
+    def _apply_runtime_tuning(self, command: OutputRuntimeTuning) -> None:
+        self._tracking_config = replace(
+            self._tracking_config,
+            hold_time_s=command.hold_time_s,
+        )
+        self._gimbal_config = replace(
+            self._gimbal_config,
+            kp=command.gimbal_kp,
+            ki=command.gimbal_ki,
+            kd=command.gimbal_kd,
+            deadband_deg=command.gimbal_deadband_deg,
+            slew_limit_dps=command.gimbal_slew_limit_dps,
+            kp_near=command.gimbal_kp_near,
+            kp_far=command.gimbal_kp_far,
+            predictive_lead_s=command.gimbal_predictive_lead_s,
+        )
+        self._auto_controller_config = AutoControllerConfig.from_configs(
+            self._gimbal_config,
+            self._servo_control_config,
+            self._search_config,
+        )
+        if self._control_ack_version is not None:
+            self._control_ack_version.value = command.version
 
     def _is_laser_enabled(self) -> bool:
         return self._laser_enabled is None or bool(self._laser_enabled.value)
@@ -230,17 +279,21 @@ class OutputProcess(mp.Process):
         _display_drop_window_count = 0
         _display_drop_window_total = 0
         _display_drop_window_start = time.perf_counter()
-        # Display throttle: render every Nth frame (2 = 30fps at 60fps camera rate)
-        _DISPLAY_RENDER_DIVISOR = 2
+        # Display throttle: render every Nth frame. Use every frame so the live
+        # preview matches the 60 FPS tracker instead of looking artificially choppy.
+        _DISPLAY_RENDER_DIVISOR = 1
         _display_frame_counter = -1  # starts at -1 so first frame (→0) always renders
         # Diagnostic HUD accumulators
         _diag_lock_frames = 0
         _diag_total_frames = 0
         _diag_latency_sum = 0.0
         _diag_latency_max = 0.0
+        _last_telemetry_time = 0.0
+        _TELEMETRY_INTERVAL_S = 1.0 / 20.0
 
         try:
             while not self._shutdown_event.is_set():
+                self._drain_runtime_controls()
                 try:
                     message = self._result_queue.get(timeout=0.05)
                 except Empty:
@@ -356,6 +409,40 @@ class OutputProcess(mp.Process):
                     _display_drops = 0
                     _display_total = 0
                     _diag_latency_max = 0.0
+
+                now = time.perf_counter()
+                if (
+                    self._telemetry_queue is not None
+                    and now - _last_telemetry_time >= _TELEMETRY_INTERVAL_S
+                ):
+                    transport_label, _transport_color = get_transport_status(sender)
+                    put_latest(
+                        self._telemetry_queue,
+                        RuntimeTelemetry(
+                            frame_id=outbound.frame_id,
+                            timestamp_ns=outbound.timestamp_ns,
+                            target_kind=outbound.target_kind,
+                            target_acquired=outbound.target_acquired,
+                            state_source=outbound.state_source,
+                            track_id=outbound.track_id,
+                            confidence=outbound.confidence,
+                            filtered_pixel=outbound.filtered_pixel,
+                            filtered_angles=outbound.filtered_angles,
+                            fps=outbound.fps,
+                            inference_ms=outbound.inference_ms,
+                            tracking_ms=outbound.tracking_ms,
+                            postprocess_ms=outbound.postprocess_ms,
+                            wait_ms=outbound.wait_ms,
+                            total_latency_ms=outbound.total_latency_ms,
+                            transport_status=transport_label,
+                            packet_sequence=sequence,
+                            lock_frames=_diag_lock_frames,
+                            total_frames=_diag_total_frames,
+                            display_drops=_display_drops,
+                            display_total=_display_total,
+                        ),
+                    )
+                    _last_telemetry_time = now
         except BaseException as exc:
             LOGGER.exception("Output process failed")
             self._report_error(exc)
@@ -521,11 +608,17 @@ class OutputProcess(mp.Process):
 
         if not is_manual:
             # Angular velocity → centideg/sec (with sign inversion) — use servo velocity (no EMA)
-            ang_vel = message.servo_angular_velocity or message.angular_velocity or (0.0, 0.0)
-            pan_vel_cdps = int(round(degrees(ang_vel[0]) * 100.0 * pan_sign))
-            tilt_vel_cdps = int(round(degrees(ang_vel[1]) * 100.0 * tilt_sign))
+            if self._auto_controller_state.search_active and not message.target_acquired:
+                pan_vel_dps = self._auto_controller_state.search_pan_velocity_dps
+                tilt_vel_dps = self._auto_controller_state.search_tilt_velocity_dps
+            else:
+                ang_vel = message.servo_angular_velocity or message.angular_velocity or (0.0, 0.0)
+                pan_vel_dps = degrees(ang_vel[0]) * pan_sign
+                tilt_vel_dps = degrees(ang_vel[1]) * tilt_sign
+            pan_vel_cdps = int(round(pan_vel_dps * 100.0))
+            tilt_vel_cdps = int(round(tilt_vel_dps * 100.0))
 
-            vel_mag_dps = (degrees(ang_vel[0]) ** 2 + degrees(ang_vel[1]) ** 2) ** 0.5
+            vel_mag_dps = (pan_vel_dps**2 + tilt_vel_dps**2) ** 0.5
             state = build_state_flags(
                 state_source=message.state_source,
                 target_acquired=message.target_acquired,

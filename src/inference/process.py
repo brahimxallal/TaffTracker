@@ -208,7 +208,7 @@ class InferenceProcess(mp.Process):
         frames_since_gc = 0
         # Rolling drop-rate telemetry: flushes every _DROP_WINDOW frames.
         _DROP_WINDOW = max(1, int(self._preflight_config.frame_drop_sample_window))
-        _FRAME_TIMEOUT_NS = int(3.0 / max(self._camera_config.fps, 1) * 1_000_000_000)
+        _FRAME_TIMEOUT_NS = int(6.0 / max(self._camera_config.fps, 1) * 1_000_000_000)
         _last_frame_received_ns = perf_counter_ns()
 
         gc.collect()
@@ -225,7 +225,7 @@ class InferenceProcess(mp.Process):
                             "No frame received for %.1f ms — capture may be stalled",
                             _FRAME_TIMEOUT_NS / 1_000_000.0,
                         )
-                        if self._capture_done_event.wait(timeout=1.0):
+                        if self._capture_done_event.is_set():
                             break
                         _last_frame_received_ns = perf_counter_ns()
                     time.sleep(0.0005)

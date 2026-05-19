@@ -242,6 +242,8 @@ def main() -> None:
             shutdown_event,
             error_queue,
             gpu_preprocess=config.flags.gpu_preprocess,
+            phone_camera_config=config.phone_camera,
+            droidcam_config=config.droidcam,
         )
 
     def _make_inference():
@@ -281,6 +283,7 @@ def main() -> None:
             config.flags,
             config.gimbal,
             servo_control_config=config.servo_control,
+            search_config=config.search,
             display_buffer_layout=display_buffer.layout if display_buffer is not None else None,
             relay_flag=relay_flag,
             laser_enabled=laser_enabled,

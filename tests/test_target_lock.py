@@ -111,13 +111,25 @@ class TestTargetLock:
         assert result.track_id == 3
         assert stage.locked_track_id == 3
 
-    def test_resets_lock_on_empty_tracks(self):
-        stage = _make_stage()
+    def test_keeps_lock_on_short_empty_track_burst(self):
+        stage = _make_stage(max_lost_frames=3)
         _select(stage, [_make_track(track_id=1, score=0.9)])
         assert stage.locked_track_id == 1
 
         result = _select(stage, [])
         assert result is None
+        assert stage.locked_track_id == 1
+
+    def test_resets_lock_after_empty_tracks_exceed_max_lost(self):
+        stage = _make_stage(max_lost_frames=2)
+        _select(stage, [_make_track(track_id=1, score=0.9)])
+        assert stage.locked_track_id == 1
+
+        assert _select(stage, []) is None
+        assert stage.locked_track_id == 1
+        assert _select(stage, []) is None
+        assert stage.locked_track_id == 1
+        assert _select(stage, []) is None
         assert stage.locked_track_id is None
 
     def test_keeps_locked_track_with_minor_lost_frames(self):
@@ -136,7 +148,7 @@ class TestTargetLock:
 
         # Everyone disappears
         _select(stage, [])
-        assert stage.locked_track_id is None
+        assert stage.locked_track_id == 1
 
         # New target appears
         t5 = _make_track(track_id=5, score=0.88)

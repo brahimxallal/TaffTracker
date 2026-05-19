@@ -88,11 +88,21 @@ firmware/**/*.env
 # --- Tooling caches ---
 .ruff_cache/
 .mypy_cache/
+.codex_tools/
+local.properties
+
+# --- Android local/build state ---
+android/**/.gradle/
+android/**/.kotlin/
+android/**/build/
+android/**/*.apk
+android/**/*.aab
 
 # --- Large/ephemeral artifacts ---
 backup_pre_refactor_*.tar
 calibration_data/*.png
 plans/
+/.codex_runtime_screen*.png
 
 # --- Misc ---
 *.bak

@@ -32,6 +32,18 @@ This repository is a low-latency vision-guided gimbal tracker with a Python mult
 - Tests are written to run without CUDA or TensorRT hardware. `tests/conftest.py` stubs hardware-only modules during collection.
 - Keep changes narrow. Do not collapse process boundaries or remove fail-safe behavior unless the user explicitly asks for that architectural change.
 
+## Desktop GUI Rules
+
+- TaffTracker uses PySide6. Apply PyQt6 UI-development guidance through the PySide6 equivalents: `Signal`, `Slot`, `QObject`, `QThread`, `QThreadPool`, QSS, and Qt layout managers.
+- Keep strict separation between UI widgets, view-model/config transforms, runtime orchestration, and hot tracking logic. UI widgets should emit commands or call narrow controller/session APIs, not own business logic.
+- Never block the Qt UI thread with camera, TensorRT, serial/UDP, subprocess, filesystem-heavy, or model-loading work. Use the existing multiprocessing runtime, `QThread`, `QThreadPool`, timers, or bounded polling.
+- Apply theme rules centrally at the `QApplication` or main-window level. Avoid scattered per-widget inline styling except object names needed by QSS.
+- Do not use absolute widget coordinates. Use `QVBoxLayout`, `QHBoxLayout`, `QGridLayout`, `QFormLayout`, stretch factors, size policies, and scroll areas for responsive desktop layouts.
+- For cross-thread UI updates, emit lightweight metadata/signals only. Never emit `QPixmap` from a worker thread, and never send full video frames through Qt signals or queues.
+- Preserve high-DPI/cross-platform behavior: avoid hardcoded text clipping, verify fonts and controls on Windows first, and use layouts/size policies instead of fixed pixel placement.
+- For custom widgets, keep painting inside `paintEvent`, avoid expensive allocations per paint, and request updates with Qt mechanisms rather than tight loops.
+- Add focused tests around view-model/config transforms and runtime-session boundaries. GUI smoke checks should verify that windows launch, controls are visible, and software-only demo mode works without CUDA/camera/ESP32.
+
 ## Important Pitfalls
 
 - The checked-in TensorRT engine may exist for one model while another target still needs export. Check the requested target before assuming runtime is ready.

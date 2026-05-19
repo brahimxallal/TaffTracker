@@ -10,6 +10,13 @@ TargetKind = Literal["human", "dog"]
 CommChannel = Literal["serial", "udp", "auto"]
 Precision = Literal["fp16", "int8"]
 Backend = Literal["auto", "msmf", "dshow", "ffmpeg"]
+SourceBackend = Literal["opencv", "phone_yuv", "phone_mpeg", "phone_h264", "droidcam"]
+PhoneStreamFormat = Literal["yuv", "mpeg"]
+PhonePixelFormat = Literal["i420", "nv12", "nv21"]
+PhoneCaptureMode = Literal["auto", "normal", "yuv", "high_speed"]
+PhoneVideoCodec = Literal["mpeg4", "h264"]
+PhoneDecodeBackend = Literal["pyav"]
+DroidCamVideoFormat = Literal["avc", "jpg", "mjpg", "hevc"]
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
 
 
@@ -26,6 +33,7 @@ class CameraConfig:
     height: int = 640
     fps: int = 60
     backend: Backend = "auto"
+    source_backend: SourceBackend = "opencv"
     buffer_size: int = 1
     orientation: Orientation = Orientation.LANDSCAPE_NATIVE
     fov: float | None = None
@@ -131,6 +139,7 @@ class TrackingConfig:
     tracker_match_threshold: float = 0.55
     tracker_track_threshold: float = 0.40
     tracker_birth_min_hits: int = 2
+    egomotion_compensation_enabled: bool = True
     postprocess: PostprocessConfig = field(default_factory=PostprocessConfig)
     kalman: KalmanConfig = field(default_factory=KalmanConfig)
     adaptive: AdaptiveConfig = field(default_factory=AdaptiveConfig)
@@ -277,6 +286,88 @@ class ServoControlConfig:
 
 
 @dataclass(frozen=True)
+class PhoneCameraConfig:
+    """Host-side TaffCam transport and startup camera controls."""
+
+    bind_host: str = "127.0.0.1"
+    frame_port: int = 27183
+    control_port: int = 27184
+    adb_reverse_enabled: bool = True
+    allow_remote_clients: bool = False
+    adb_path: str = "adb"
+    adb_serial: str | None = None
+    adb_reverse_timeout_s: float = 4.0
+    start_app_on_open: bool = True
+    force_stop_app_on_open: bool = True
+    app_start_delay_s: float = 1.0
+    width: int = 640
+    height: int = 480
+    fps: int = 60
+    stream_format: PhoneStreamFormat = "mpeg"
+    pixel_format: PhonePixelFormat = "i420"
+    codec: PhoneVideoCodec = "h264"
+    bitrate_bps: int = 8_000_000
+    keyframe_interval_s: float = 1.0
+    decode_backend: PhoneDecodeBackend = "pyav"
+    capture_mode: PhoneCaptureMode = "auto"
+    connect_timeout_s: float = 5.0
+    read_timeout_s: float = 0.08
+    control_timeout_s: float = 2.0
+    camera_id: str | None = None
+    focus_diopters: float | None = None
+    exposure_ns: int | None = None
+    iso: int | None = None
+    awb_enabled: bool = False
+    awb_lock: bool = True
+    white_balance_kelvin: int | None = None
+    torch_enabled: bool = False
+    zoom_ratio: float | None = None
+
+
+@dataclass(frozen=True)
+class DroidCamConfig:
+    """DroidCam Classic direct stream and remote-control integration."""
+
+    host: str = "127.0.0.1"
+    port: int = 4747
+    width: int = 640
+    height: int = 480
+    fps: int = 60
+    video_format: DroidCamVideoFormat = "jpg"
+    connect_timeout_s: float = 2.0
+    read_timeout_s: float = 0.03
+    remote_enabled: bool = False
+    remote_timeout_s: float = 0.25
+    active_camera: int | None = None
+    autofocus_once: bool = False
+    autofocus_mode: int | None = None
+    manual_focus: float | None = None
+    exposure_lock: bool | None = True
+    ev: float | None = None
+    wb_mode: int | None = None
+    wb_lock: bool | None = True
+    wb_level: int | None = None
+    torch_enabled: bool | None = None
+    zoom: float | None = None
+
+
+@dataclass(frozen=True)
+class SearchConfig:
+    """Intelligent target-lost sweep used by the output controller."""
+
+    enabled: bool = False
+    start_after_s: float = 0.25
+    timeout_s: float = 6.0
+    initial_radius_deg: float = 2.0
+    max_radius_deg: float = 24.0
+    expansion_rate_dps: float = 6.0
+    scan_speed_dps: float = 18.0
+    tilt_amplitude_ratio: float = 0.35
+    prediction_horizon_s: float = 0.60
+    return_home: bool = True
+
+
+@dataclass(frozen=True)
 class RuntimeFlags:
     debug: bool = False
     headless: bool = False
@@ -309,6 +400,9 @@ class PipelineConfig:
     preflight: PreflightConfig = field(default_factory=PreflightConfig)
     relay: RelayConfig = field(default_factory=RelayConfig)
     servo_control: ServoControlConfig = field(default_factory=ServoControlConfig)
+    phone_camera: PhoneCameraConfig = field(default_factory=PhoneCameraConfig)
+    droidcam: DroidCamConfig = field(default_factory=DroidCamConfig)
+    search: SearchConfig = field(default_factory=SearchConfig)
 
 
 def default_tracking_config(target: TargetKind) -> TrackingConfig:

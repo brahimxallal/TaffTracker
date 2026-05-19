@@ -10,11 +10,14 @@ import pytest
 from src.config import (
     AdaptiveConfig,
     CameraConfig,
+    DroidCamConfig,
     GimbalConfig,
     KalmanConfig,
     ModelConfig,
+    PhoneCameraConfig,
     PipelineConfig,
     PostprocessConfig,
+    SearchConfig,
     TrackingConfig,
     adapt_tracking_for_fps,
     default_tracking_config,
@@ -210,6 +213,46 @@ def test_pipeline_config_carries_gimbal() -> None:
     cfg = PipelineConfig(mode="camera", target="human", source="0")
     assert isinstance(cfg.gimbal, GimbalConfig)
     assert cfg.gimbal.invert_pan is False
+
+
+@pytest.mark.unit
+def test_pipeline_config_carries_search_config() -> None:
+    cfg = PipelineConfig(mode="camera", target="human", source="0")
+    assert isinstance(cfg.search, SearchConfig)
+    assert cfg.search.enabled is False
+
+
+@pytest.mark.unit
+def test_pipeline_config_carries_phone_camera_config() -> None:
+    cfg = PipelineConfig(mode="camera", target="human", source="0")
+    assert isinstance(cfg.phone_camera, PhoneCameraConfig)
+    assert cfg.phone_camera.bind_host == "127.0.0.1"
+    assert cfg.phone_camera.allow_remote_clients is False
+    assert cfg.phone_camera.frame_port == 27183
+    assert cfg.phone_camera.stream_format == "mpeg"
+    assert cfg.phone_camera.pixel_format == "i420"
+    assert cfg.phone_camera.codec == "h264"
+    assert cfg.phone_camera.bitrate_bps == 8_000_000
+    assert cfg.phone_camera.keyframe_interval_s == 1.0
+    assert cfg.phone_camera.decode_backend == "pyav"
+    assert cfg.phone_camera.capture_mode == "auto"
+
+
+@pytest.mark.unit
+def test_pipeline_config_carries_droidcam_config() -> None:
+    cfg = PipelineConfig(mode="camera", target="human", source="0")
+    assert isinstance(cfg.droidcam, DroidCamConfig)
+    assert cfg.droidcam.host == "127.0.0.1"
+    assert cfg.droidcam.port == 4747
+    assert cfg.droidcam.video_format == "jpg"
+    assert cfg.droidcam.fps == 60
+    assert cfg.droidcam.remote_enabled is False
+
+
+@pytest.mark.unit
+def test_camera_config_source_backend_defaults_to_opencv() -> None:
+    cfg = CameraConfig()
+    assert cfg.source_backend == "opencv"
 
 
 @pytest.mark.unit

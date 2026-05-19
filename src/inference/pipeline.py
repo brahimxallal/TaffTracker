@@ -83,7 +83,9 @@ class TrackingPipeline:
             tracks, record.frame, record.timestamp_ns, prev_locked_id
         )
 
-        current_locked = primary_track.track_id if primary_track is not None else None
+        current_locked = (
+            primary_track.track_id if primary_track is not None else ts.locked_track_id
+        )
         proximity_transfer = ts.consume_proximity_transfer()
 
         # Handle lock transitions
@@ -242,10 +244,14 @@ class TrackingPipeline:
                 is_occlusion_recovery = True
                 kalman.oru_re_update()
 
-            compensation = cs.compensate_measurement_for_egomotion(
-                raw_pixel,
-                dt,
-                record.timestamp_ns,
+            compensation = (
+                cs.compensate_measurement_for_egomotion(
+                    raw_pixel,
+                    dt,
+                    record.timestamp_ns,
+                )
+                if self._tracking_config.egomotion_compensation_enabled
+                else None
             )
             measurement_pixel = raw_pixel
             if compensation is not None:
@@ -260,6 +266,7 @@ class TrackingPipeline:
                 filtered_velocity = (filtered_state.vx, filtered_state.vy)
             else:
                 filtered_velocity = (0.0, 0.0)
+            ts.update_locked_bbox(primary_track.bbox)
             ts.last_locked_velocity = filtered_velocity
             ts.last_locked_timestamp_ns = record.timestamp_ns
 
@@ -296,7 +303,7 @@ class TrackingPipeline:
             )
             servo_angles = filtered_angles
             state_source = "prediction" if predicted is not None else "lost"
-            track_id = primary_track.track_id if primary_track is not None else None
+            track_id = ts.locked_track_id
             confidence = 0.0
             target_acquired = False
             next_was_lost = True
