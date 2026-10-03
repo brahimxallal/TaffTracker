@@ -48,3 +48,27 @@ def test_validate_environment_allows_video_mode_without_calibration(
     )
 
     validate_environment(config)
+
+
+@pytest.mark.unit
+def test_validate_environment_reports_incompatible_tensorrt_engine(
+    engine_dir: Path,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = PipelineConfig(
+        mode="video",
+        target="dog",
+        source=str(tmp_path / "video.mp4"),
+        models=ModelConfig(engine_dir=engine_dir),
+        paths=RuntimePaths(calibration_dir=tmp_path / "calibration_data"),
+    )
+    Path(config.source).write_bytes(b"video")
+
+    def _raise_incompatible(engine_path: Path) -> None:
+        raise RuntimeError(f"selected TensorRT cannot deserialize {engine_path}")
+
+    monkeypatch.setattr("src.cli.validate_tensorrt_engine_compatibility", _raise_incompatible)
+
+    with pytest.raises(RuntimeError, match="selected TensorRT cannot deserialize"):
+        validate_environment(config)
