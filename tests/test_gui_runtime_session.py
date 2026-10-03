@@ -18,6 +18,19 @@ def _config():
     )
 
 
+def _config_with_phone_imu():
+    return build_config_from_yaml(
+        {
+            "mode": "video",
+            "source": "videos/sample.mp4",
+            "camera": {"width": 320, "height": 240, "fps": 30},
+            "comms": {"enabled": False},
+            "laser": {"enabled": False},
+            "phone_imu": {"enabled": True},
+        }
+    )
+
+
 def _fake_process_class(name: str):
     class FakeProcess:
         def __init__(self, *args, **kwargs) -> None:
@@ -65,6 +78,28 @@ def test_runtime_session_starts_existing_process_graph_with_fake_processes(monke
         assert all(process.alive for process in snapshot.process_states)
         assert snapshot.display_available is True
         assert snapshot.laser_enabled is False
+    finally:
+        session.stop(join_timeout=0.01, terminate_timeout=0.01)
+
+
+def test_runtime_session_starts_phone_imu_process_when_enabled(monkeypatch):
+    monkeypatch.setattr(runtime_session, "CaptureProcess", _fake_process_class("CaptureProcess"))
+    monkeypatch.setattr(
+        runtime_session, "InferenceProcess", _fake_process_class("InferenceProcess")
+    )
+    monkeypatch.setattr(runtime_session, "OutputProcess", _fake_process_class("OutputProcess"))
+    monkeypatch.setattr(runtime_session, "PhoneImuProcess", _fake_process_class("PhoneImuProcess"))
+
+    session = RuntimeSession(_config_with_phone_imu(), validate_on_start=False)
+    try:
+        snapshot = session.start()
+
+        assert [process.name for process in snapshot.process_states] == [
+            "CaptureProcess",
+            "InferenceProcess",
+            "OutputProcess",
+            "PhoneImuProcess",
+        ]
     finally:
         session.stop(join_timeout=0.01, terminate_timeout=0.01)
 

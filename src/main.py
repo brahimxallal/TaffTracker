@@ -5,6 +5,7 @@ import multiprocessing as mp
 import os
 import signal
 import time
+from contextlib import ExitStack
 from pathlib import Path
 
 from src.capture.process import CaptureProcess
@@ -19,9 +20,12 @@ from src.process_supervisor import (
     log_error_reports,
     stop_processes,
 )
+from src.sensors.process import PhoneImuProcess
 from src.shared.display_buffer import SharedDisplayBuffer
+from src.shared.logging_config import configure_logging_environment, configure_process_logging
 from src.shared.ring_buffer import SharedRingBuffer
 from src.shared.types import ProcessErrorReport
+from src.shared.windows_timer import WindowsTimerResolution
 from src.ui.hotkeys import is_quit_hotkey
 from src.ui.manual_keyboard import ManualKeyboardConfig, ManualKeyboardDriver
 from src.ui.overlays import draw_help_overlay, draw_laser_cal_hud
@@ -36,9 +40,6 @@ __all__ = [
 
 LOGGER = logging.getLogger("main")
 
-MANUAL_FINE_SPEED_DPS = 120.0
-MANUAL_COARSE_SPEED_DPS = 300.0
-MANUAL_ACCEL_TIME = 0.05  # seconds to reach full speed
 _MAX_PROCESS_RESTARTS = 3
 
 
@@ -155,15 +156,16 @@ def main() -> None:
     mp.freeze_support()
     args = parse_args()
     config = build_config(args)
-    log_level = getattr(logging, config.flags.log_level, logging.INFO)
-    log_handlers: list[logging.Handler] = [logging.StreamHandler()]
-    if config.flags.log_file is not None:
-        config.flags.log_file.parent.mkdir(parents=True, exist_ok=True)
-        log_handlers.append(logging.FileHandler(str(config.flags.log_file)))
-    logging.basicConfig(
-        level=log_level,
-        format="%(asctime)s %(processName)s %(levelname)s %(message)s",
-        handlers=log_handlers,
+    resolved_log_file = (
+        config.paths.resolve_path(config.flags.log_file)
+        if config.flags.log_file is not None
+        else None
+    )
+    configure_logging_environment(resolved_log_file, config.flags.log_level)
+    configure_process_logging(
+        log_file=resolved_log_file,
+        level_name=config.flags.log_level,
+        force=True,
     )
     validate_environment(config)
     _kill_previous_instance()
@@ -176,9 +178,9 @@ def main() -> None:
     # so the GIL does not serialize the pipeline.
     ring_buffer, write_index = SharedRingBuffer.create(
         (config.camera.height, config.camera.width, 3),
-        num_slots=3,
+        num_slots=config.flags.ring_buffer_slots,
     )
-    result_queue: mp.Queue = mp.Queue(maxsize=16)
+    result_queue: mp.Queue = mp.Queue(maxsize=1)
     error_queue: mp.Queue = mp.Queue(maxsize=8)
     capture_done_event = mp.Event()
     shutdown_event = mp.Event()
@@ -195,7 +197,7 @@ def main() -> None:
         )
 
     relay_flag = mp.Value("b", 0)
-    laser_enabled = mp.Value("b", 1)
+    laser_enabled = mp.Value("b", int(config.laser.enabled))
     relay_pulse_s = config.relay.pulse_ms / 1000.0
     relay_off_time: float = 0.0
     show_help: bool = False
@@ -207,11 +209,7 @@ def main() -> None:
     manual_pan = mp.Value("d", 0.0)  # absolute pan angle (degrees)
     manual_tilt = mp.Value("d", 0.0)  # absolute tilt angle (degrees)
     manual_keyboard = ManualKeyboardDriver(
-        ManualKeyboardConfig(
-            fine_speed_dps=MANUAL_FINE_SPEED_DPS,
-            coarse_speed_dps=MANUAL_COARSE_SPEED_DPS,
-            accel_time_s=MANUAL_ACCEL_TIME,
-        )
+        ManualKeyboardConfig.from_servo_control(config.servo_control)
     )
 
     # Laser boresight offset (live-updated by interactive calibrator, read by OutputProcess)
@@ -267,6 +265,7 @@ def main() -> None:
             cycle_target_event=cycle_target_event,
             command_pan=manual_pan,
             command_tilt=manual_tilt,
+            laser_enabled=laser_enabled,
         )
 
     def _make_output():
@@ -286,6 +285,7 @@ def main() -> None:
             search_config=config.search,
             display_buffer_layout=display_buffer.layout if display_buffer is not None else None,
             relay_flag=relay_flag,
+            relay_config=config.relay,
             laser_enabled=laser_enabled,
             manual_mode=manual_mode,
             manual_pan=manual_pan,
@@ -294,19 +294,33 @@ def main() -> None:
             laser_boresight_tilt=laser_boresight_tilt,
         )
 
+    def _make_phone_imu():
+        return PhoneImuProcess(
+            config.phone_imu,
+            shutdown_event,
+            error_queue,
+        )
+
     capture = _make_capture()
     inference = _make_inference()
     output = _make_output()
+    phone_imu = _make_phone_imu() if config.phone_imu.enabled else None
 
     _process_factories: dict[str, callable] = {
         "CaptureProcess": _make_capture,
         "InferenceProcess": _make_inference,
         "OutputProcess": _make_output,
     }
+    if config.phone_imu.enabled:
+        _process_factories["PhoneImuProcess"] = _make_phone_imu
     _restart_counts: dict[str, int] = {name: 0 for name in _process_factories}
 
     processes = [capture, inference, output]
+    if phone_imu is not None:
+        processes.append(phone_imu)
+    timer_resolution = ExitStack()
     try:
+        timer_resolution.enter_context(WindowsTimerResolution(period_ms=1))
         for process in processes:
             process.start()
 
@@ -454,9 +468,12 @@ def main() -> None:
         # Ensure shutdown event is set
         shutdown_event.set()
 
-        _log_error_reports(_drain_error_reports(error_queue))
-        _stop_processes(processes)
-        _cleanup_runtime_resources(ring_buffer, display_buffer=display_buffer)
+        try:
+            _log_error_reports(_drain_error_reports(error_queue))
+            _stop_processes(processes)
+            _cleanup_runtime_resources(ring_buffer, display_buffer=display_buffer)
+        finally:
+            timer_resolution.close()
 
 
 if __name__ == "__main__":

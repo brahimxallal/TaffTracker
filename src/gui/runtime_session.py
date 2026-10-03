@@ -24,7 +24,9 @@ from src.process_supervisor import (
     log_error_reports,
     stop_processes,
 )
+from src.sensors.process import PhoneImuProcess
 from src.shared.display_buffer import SharedDisplayBuffer
+from src.shared.logging_config import configure_logging_environment
 from src.shared.ring_buffer import SharedRingBuffer
 from src.shared.runtime_control import OutputRuntimeTuning
 from src.shared.telemetry import RuntimeTelemetry
@@ -118,6 +120,8 @@ class RuntimeSession:
             self._process_factories["InferenceProcess"](),
             self._process_factories["OutputProcess"](),
         ]
+        if self._config.phone_imu.enabled:
+            self._processes.append(self._process_factories["PhoneImuProcess"]())
 
         try:
             for process in self._processes:
@@ -302,12 +306,19 @@ class RuntimeSession:
         self.stop()
 
     def _allocate_runtime_resources(self) -> None:
+        resolved_log_file = (
+            self._config.paths.resolve_path(self._config.flags.log_file)
+            if self._config.flags.log_file is not None
+            else None
+        )
+        configure_logging_environment(resolved_log_file, self._config.flags.log_level)
+
         self._ring_buffer, self._write_index = SharedRingBuffer.create(
             (self._config.camera.height, self._config.camera.width, 3),
-            num_slots=3,
+            num_slots=self._config.flags.ring_buffer_slots,
             context=self._ctx,
         )
-        self._result_queue = self._ctx.Queue(maxsize=16)
+        self._result_queue = self._ctx.Queue(maxsize=1)
         self._error_queue = self._ctx.Queue(maxsize=8)
         self._telemetry_queue = self._ctx.Queue(maxsize=1)
         self._control_queue = self._ctx.Queue(maxsize=1)
@@ -336,6 +347,7 @@ class RuntimeSession:
             "CaptureProcess": 0,
             "InferenceProcess": 0,
             "OutputProcess": 0,
+            "PhoneImuProcess": 0,
         }
         self._last_errors = []
         self._latest_telemetry = None
@@ -386,6 +398,7 @@ class RuntimeSession:
                 cycle_target_event=self._cycle_target_event,
                 command_pan=self._manual_pan,
                 command_tilt=self._manual_tilt,
+                laser_enabled=self._laser_enabled,
             )
 
         def make_output() -> mp.Process:
@@ -410,6 +423,7 @@ class RuntimeSession:
                 control_queue=self._control_queue,
                 control_ack_version=self._control_ack_version,
                 relay_flag=self._relay_flag,
+                relay_config=self._config.relay,
                 laser_enabled=self._laser_enabled,
                 manual_mode=self._manual_mode,
                 manual_pan=self._manual_pan,
@@ -418,10 +432,18 @@ class RuntimeSession:
                 laser_boresight_tilt=self._laser_boresight_tilt,
             )
 
+        def make_phone_imu() -> mp.Process:
+            return PhoneImuProcess(
+                self._config.phone_imu,
+                self._shutdown_event,
+                self._error_queue,
+            )
+
         self._process_factories = {
             "CaptureProcess": make_capture,
             "InferenceProcess": make_inference,
             "OutputProcess": make_output,
+            "PhoneImuProcess": make_phone_imu,
         }
 
     def _cleanup_resources(self) -> None:
