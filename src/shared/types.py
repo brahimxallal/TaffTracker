@@ -89,6 +89,8 @@ class TrackingMessage:
     laser_pixel: tuple[float, float] | None = None
     other_targets: tuple[tuple[float, float, int, float], ...] = ()  # (cx, cy, track_id, score)
     egomotion_applied_px: tuple[float, float] | None = None
+    capture_age_ms: float = 0.0
+    skipped_frames: int = 0
 
 
 @dataclass(frozen=True, slots=True)

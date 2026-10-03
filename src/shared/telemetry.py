@@ -28,6 +28,8 @@ class RuntimeTelemetry:
     total_frames: int
     display_drops: int
     display_total: int
+    capture_age_ms: float = 0.0
+    skipped_frames: int = 0
 
 
 def put_latest(queue: Any | None, item: Any) -> None:

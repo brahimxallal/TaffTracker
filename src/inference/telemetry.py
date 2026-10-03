@@ -52,6 +52,12 @@ def format_profiler_summary(
         segments.append(
             f"wait p50/p95/p99 {wait_stats[0]:.1f}/{wait_stats[1]:.1f}/{wait_stats[2]:.1f} ms"
         )
+    capture_age_stats = profiler.get_percentiles("capture_age")
+    if capture_age_stats is not None:
+        segments.append(
+            "age p50/p95/p99 "
+            f"{capture_age_stats[0]:.1f}/{capture_age_stats[1]:.1f}/{capture_age_stats[2]:.1f} ms"
+        )
     segments.append(
         f"inf p50/p95/p99 {inference_stats[0]:.1f}/{inference_stats[1]:.1f}/{inference_stats[2]:.1f} ms"
     )
