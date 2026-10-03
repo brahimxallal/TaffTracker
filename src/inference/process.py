@@ -5,6 +5,7 @@ import logging
 import multiprocessing as mp
 import time
 from collections import deque
+from dataclasses import replace
 from multiprocessing.sharedctypes import Synchronized
 from time import perf_counter_ns
 from traceback import format_exc
@@ -32,10 +33,12 @@ from src.inference.postprocess import (
     parse_yolo_output,
 )
 from src.inference.result_publisher import ResultPublisher
+from src.inference.scheduler import DetectorScheduler
 from src.inference.stages.centroid import CentroidStage
 from src.inference.stages.servo import ServoStage
 from src.inference.stages.tracker import TrackerStage
 from src.inference.telemetry import format_profiler_summary, write_profiler_summary
+from src.shared.logging_config import configure_process_logging
 from src.shared.pose_schema import PoseSchema
 from src.shared.profiler import StageProfiler
 from src.shared.ring_buffer import RingBufferLayout, SharedRingBuffer
@@ -70,6 +73,7 @@ class InferenceProcess(mp.Process):
         cycle_target_event: mp.synchronize.Event | None = None,
         command_pan: Synchronized | None = None,
         command_tilt: Synchronized | None = None,
+        laser_enabled: Synchronized | None = None,
     ) -> None:
         super().__init__(name="InferenceProcess")
         self._layout = layout
@@ -91,10 +95,11 @@ class InferenceProcess(mp.Process):
         self._cycle_target_event = cycle_target_event
         self._command_pan = command_pan
         self._command_tilt = command_tilt
+        self._laser_enabled = laser_enabled
         self._frames_processed = 0
         self._last_log_time = time.perf_counter()
         self._fps_window: deque[float] = deque(maxlen=30)
-        self._publisher = ResultPublisher(result_queue, logger=LOGGER)
+        self._publisher = ResultPublisher(result_queue, logger=LOGGER, latest_only=True)
 
     def run(self) -> None:
         import sys
@@ -108,10 +113,7 @@ class InferenceProcess(mp.Process):
             )
 
         sys.excepthook = _excepthook
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s %(processName)s %(levelname)s %(message)s",
-        )
+        configure_process_logging()
 
         # ── Component construction (child process) ──
         ring_buffer = SharedRingBuffer.attach(self._layout, self._write_index)
@@ -176,6 +178,7 @@ class InferenceProcess(mp.Process):
         servo_stage = ServoStage(
             laser_detector=laser_detector,
             laser_roi_radius=self._laser_config.roi_radius_px if self._laser_config else 150.0,
+            laser_enabled=self._laser_enabled,
         )
         pipeline = TrackingPipeline(
             tracker_stage=tracker_stage,
@@ -187,6 +190,7 @@ class InferenceProcess(mp.Process):
             ema_pixel=ema_pixel,
             servo_ema_pixel=servo_ema_pixel,
         )
+        detector_scheduler = DetectorScheduler(self._tracking_config.inference_schedule)
 
         # ── Loop state ──
         last_frame_id = 0
@@ -194,6 +198,7 @@ class InferenceProcess(mp.Process):
         was_lost = False
         prev_locked_id: int | None = None
         prev_locked_bbox: tuple[float, ...] | None = None
+        force_detector = False
 
         from src.shared.preflight import FrameHealthMonitor
 
@@ -210,6 +215,8 @@ class InferenceProcess(mp.Process):
         _DROP_WINDOW = max(1, int(self._preflight_config.frame_drop_sample_window))
         _FRAME_TIMEOUT_NS = int(6.0 / max(self._camera_config.fps, 1) * 1_000_000_000)
         _last_frame_received_ns = perf_counter_ns()
+        _run_start_ns = _last_frame_received_ns
+        _WARMUP_NS = 3_000_000_000
 
         gc.collect()
         gc.disable()
@@ -220,23 +227,32 @@ class InferenceProcess(mp.Process):
                 if record is None:
                     if self._capture_done_event.is_set():
                         break
-                    if (perf_counter_ns() - _last_frame_received_ns) > _FRAME_TIMEOUT_NS:
-                        LOGGER.warning(
-                            "No frame received for %.1f ms — capture may be stalled",
-                            _FRAME_TIMEOUT_NS / 1_000_000.0,
-                        )
+                    now_ns = perf_counter_ns()
+                    if (now_ns - _last_frame_received_ns) > _FRAME_TIMEOUT_NS:
+                        elapsed_ms = (now_ns - _last_frame_received_ns) / 1_000_000.0
+                        if now_ns - _run_start_ns <= _WARMUP_NS:
+                            LOGGER.info(
+                                "Capture warmup: no frame received for %.1f ms",
+                                elapsed_ms,
+                            )
+                        else:
+                            LOGGER.warning(
+                                "Capture stall: no frame received for %.1f ms",
+                                elapsed_ms,
+                            )
                         if self._capture_done_event.is_set():
                             break
-                        _last_frame_received_ns = perf_counter_ns()
+                        _last_frame_received_ns = now_ns
                     time.sleep(0.0005)
                     continue
                 _last_frame_received_ns = perf_counter_ns()
 
                 # Frame drop tracking
+                skipped_frames = 0
                 if last_frame_id > 0:
-                    skipped = record.frame_id - last_frame_id
-                    if skipped > 1:
-                        frame_drop_count += skipped - 1
+                    skipped_frames = max(0, record.frame_id - last_frame_id - 1)
+                    if skipped_frames > 0:
+                        frame_drop_count += skipped_frames
                 frame_total_count += 1
                 if frame_total_count % _DROP_WINDOW == 0:
                     profiler.add_sample("frame_drops", frame_drop_count)
@@ -257,12 +273,14 @@ class InferenceProcess(mp.Process):
                     self._relock_event.clear()
                     tracker_stage.request_relock()
                     prev_locked_id = None
+                    force_detector = True
                     LOGGER.info("Relock requested by user — releasing target lock")
 
                 # Check cycle target signal
                 if self._cycle_target_event is not None and self._cycle_target_event.is_set():
                     self._cycle_target_event.clear()
                     tracker_stage.request_cycle()
+                    force_detector = True
                     LOGGER.info("Cycle target requested by user")
 
                 frame = record.frame
@@ -271,12 +289,16 @@ class InferenceProcess(mp.Process):
                     LOGGER.warning(warning)
 
                 wait_ms = (perf_counter_ns() - record.timestamp_ns) / 1_000_000.0
+                capture_age_ms = wait_ms
                 profiler.add_sample("wait", int(wait_ms * 1_000_000))
-
-                inference_start_ns = perf_counter_ns()
-                with profiler.stage("inference"):
-                    raw_output = engine.infer(frame)
-                inference_ms = (perf_counter_ns() - inference_start_ns) / 1_000_000.0
+                profiler.add_sample("capture_age", int(capture_age_ms * 1_000_000))
+                if skipped_frames > 0 and perf_counter_ns() - _run_start_ns > _WARMUP_NS:
+                    LOGGER.warning(
+                        "Capture frame skip: skipped=%d frame_id=%d age=%.1f ms",
+                        skipped_frames,
+                        record.frame_id,
+                        capture_age_ms,
+                    )
 
                 # Rolling FPS
                 now_s = time.perf_counter()
@@ -287,35 +309,87 @@ class InferenceProcess(mp.Process):
                         self._fps_window[-1] - self._fps_window[0]
                     )
 
-                with profiler.stage("tracking"):
-                    postprocess_start_ns = perf_counter_ns()
-                    detections = parse_yolo_output(
-                        raw_output,
-                        conf_threshold=adaptive.confidence_threshold,
-                        num_keypoints=num_keypoints,
-                    )
-                    tracks = tracker.update(
-                        detections,
-                        timestamp_ns=record.timestamp_ns,
-                        frame=record.frame,
-                        angular_velocity=centroid_stage.last_camera_angular_velocity,
-                    )
-                    postprocess_ms = (perf_counter_ns() - postprocess_start_ns) / 1_000_000.0
-                    profiler.add_sample("postprocess", int(postprocess_ms * 1_000_000))
+                has_predictable_lock = (
+                    tracker_stage.locked_track_id is not None and tracker_stage.kalman.initialized
+                )
+                detector_decision = detector_scheduler.should_run_detector(
+                    frame_id=record.frame_id,
+                    timestamp_ns=record.timestamp_ns,
+                    has_predictable_lock=has_predictable_lock,
+                    force_detector=force_detector,
+                )
+                force_detector = False
 
-                    message, was_lost, current_locked, prev_locked_bbox = pipeline.process_frame(
-                        record=record,
-                        frame=frame,
-                        tracks=tracks,
-                        prev_locked_id=prev_locked_id,
-                        was_lost=was_lost,
-                        dt=dt,
-                        fps=fps_val,
-                        wait_ms=wait_ms,
-                        inference_ms=inference_ms,
-                        postprocess_ms=postprocess_ms,
+                if detector_decision.run_detector:
+                    inference_start_ns = perf_counter_ns()
+                    with profiler.stage("inference"):
+                        raw_output = engine.infer(frame)
+                    inference_ms = (perf_counter_ns() - inference_start_ns) / 1_000_000.0
+
+                    with profiler.stage("tracking"):
+                        postprocess_start_ns = perf_counter_ns()
+                        detections = parse_yolo_output(
+                            raw_output,
+                            conf_threshold=adaptive.confidence_threshold,
+                            num_keypoints=num_keypoints,
+                        )
+                        tracks = tracker.update(
+                            detections,
+                            timestamp_ns=record.timestamp_ns,
+                            frame=record.frame,
+                            angular_velocity=centroid_stage.last_camera_angular_velocity,
+                        )
+                        postprocess_ms = (perf_counter_ns() - postprocess_start_ns) / 1_000_000.0
+                        profiler.add_sample("postprocess", int(postprocess_ms * 1_000_000))
+
+                        message, was_lost, current_locked, prev_locked_bbox = (
+                            pipeline.process_frame(
+                                record=record,
+                                frame=frame,
+                                tracks=tracks,
+                                prev_locked_id=prev_locked_id,
+                                was_lost=was_lost,
+                                dt=dt,
+                                fps=fps_val,
+                                wait_ms=wait_ms,
+                                inference_ms=inference_ms,
+                                postprocess_ms=postprocess_ms,
+                            )
+                        )
+                        detector_scheduler.mark_detector_result(
+                            frame_id=record.frame_id,
+                            timestamp_ns=record.timestamp_ns,
+                            confidence=message.confidence if message.target_acquired else 0.0,
+                        )
+                        prev_locked_id = current_locked
+                else:
+                    profiler.add_sample("inference", 0)
+                    profiler.add_sample("postprocess", 0)
+                    with profiler.stage("tracking"):
+                        message, was_lost, current_locked, prev_locked_bbox = (
+                            pipeline.process_prediction_frame(
+                                record=record,
+                                frame=frame,
+                                prev_locked_id=prev_locked_id,
+                                was_lost=was_lost,
+                                dt=dt,
+                                fps=fps_val,
+                                wait_ms=wait_ms,
+                                prediction_confidence=detector_scheduler.last_detector_confidence,
+                            )
+                        )
+                        prev_locked_id = current_locked
+                    LOGGER.debug(
+                        "Detector skipped: frame=%d reason=%s",
+                        record.frame_id,
+                        detector_decision.reason,
                     )
-                    prev_locked_id = current_locked
+
+                message = replace(
+                    message,
+                    capture_age_ms=capture_age_ms,
+                    skipped_frames=skipped_frames,
+                )
 
                 self._publish(message)
                 profiler.add_sample("total_latency", int(message.total_latency_ms * 1_000_000))

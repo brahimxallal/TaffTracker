@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 LOGGER = logging.getLogger("inference.servo")
 
@@ -18,9 +19,14 @@ class ServoStage:
         self,
         laser_detector=None,
         laser_roi_radius: float = 150.0,
+        laser_enabled: Any | None = None,
     ) -> None:
         self.laser_detector = laser_detector
         self._laser_roi_radius = laser_roi_radius
+        self._laser_enabled = laser_enabled
+
+    def _is_laser_enabled(self) -> bool:
+        return self._laser_enabled is None or bool(self._laser_enabled.value)
 
     def process(
         self,
@@ -38,7 +44,11 @@ class ServoStage:
         del target_acquired, dt  # retained for call-site compatibility
         laser_pixel = None
 
-        if self.laser_detector is not None and filtered_pixel is not None:
+        if (
+            self.laser_detector is not None
+            and filtered_pixel is not None
+            and self._is_laser_enabled()
+        ):
             det = self.laser_detector.detect(
                 frame,
                 roi_center=filtered_pixel,

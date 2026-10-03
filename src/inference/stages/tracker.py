@@ -15,6 +15,7 @@ LOGGER = logging.getLogger("inference.tracker")
 _MAX_CACHED_TRACKS = 8
 _MAX_CACHE_AGE_NS = 10_000_000_000  # 10 seconds
 _PROXIMITY_TRANSFER_PX = 160.0
+_STALE_LOCK_HANDOFF_GRACE_FRAMES = 3
 
 
 @dataclass
@@ -91,6 +92,11 @@ class TrackerStage:
         self._last_locked_centroid = None
         self._last_locked_bbox_center = None
 
+    def force_lock(self, track_id: int) -> None:
+        self._locked_track_id = int(track_id)
+        self._locked_missing_frames = 0
+        self._cycle_requested = False
+
     def update_locked_bbox(self, bbox: np.ndarray) -> None:
         self._last_locked_bbox_center = (
             float((bbox[0] + bbox[2]) * 0.5),
@@ -101,6 +107,58 @@ class TrackerStage:
         flag = self._proximity_transfer
         self._proximity_transfer = False
         return flag
+
+    def _velocity_predicted_centroid(self, timestamp_ns: int) -> tuple[float, float] | None:
+        if (
+            self._last_locked_centroid is None
+            or self._last_locked_velocity is None
+            or self._last_locked_timestamp_ns is None
+        ):
+            return None
+
+        dt_s = (timestamp_ns - self._last_locked_timestamp_ns) / 1e9
+        if not 0.0 < dt_s < 2.0:
+            return None
+
+        vx, vy = self._last_locked_velocity
+        return (
+            self._last_locked_centroid[0] + vx * dt_s,
+            self._last_locked_centroid[1] + vy * dt_s,
+        )
+
+    def _last_locked_reference_center(self, timestamp_ns: int) -> tuple[float, float] | None:
+        return (
+            self._velocity_predicted_centroid(timestamp_ns)
+            or self._last_locked_bbox_center
+            or self._last_locked_centroid
+        )
+
+    def _nearest_visible_track(
+        self, tracks, reference_center: tuple[float, float] | None
+    ) -> tuple[object | None, float | None]:
+        if reference_center is None:
+            return None, None
+
+        best_track = None
+        best_dist_sq = _PROXIMITY_TRANSFER_PX * _PROXIMITY_TRANSFER_PX
+        best_score: tuple[float, int, float, int] | None = None
+        ref_x, ref_y = reference_center
+        for track in tracks:
+            if track.lost_frames > 0:
+                continue
+            cx, cy = track.centroid
+            dist_sq = (cx - ref_x) ** 2 + (cy - ref_y) ** 2
+            if dist_sq >= best_dist_sq:
+                continue
+            score = (dist_sq, -int(track.age), -float(track.score), int(track.track_id))
+            if best_score is None or score < best_score:
+                best_track = track
+                best_score = score
+                best_dist_sq = dist_sq
+
+        if best_track is None:
+            return None, None
+        return best_track, best_dist_sq**0.5
 
     def select_primary_track(self, tracks, frame, timestamp_ns, prev_locked_id):
         if not tracks:
@@ -140,40 +198,47 @@ class TrackerStage:
         if self._locked_track_id is not None:
             for track in tracks:
                 if track.track_id == self._locked_track_id:
+                    if track.lost_frames <= _STALE_LOCK_HANDOFF_GRACE_FRAMES:
+                        self._locked_missing_frames = int(track.lost_frames)
+                        return track, False
                     if track.lost_frames <= self._max_lost_frames:
+                        reference_center = self._last_locked_reference_center(timestamp_ns)
+                        best_prox, best_dist = self._nearest_visible_track(
+                            tracks, reference_center
+                        )
+                        if best_prox is not None:
+                            old_id = self._locked_track_id
+                            self._locked_track_id = best_prox.track_id
+                            self._locked_missing_frames = 0
+                            self._proximity_transfer = True
+                            LOGGER.info(
+                                "Stale-lock proximity transfer: %d -> %d "
+                                "(lost=%d dist=%.1fpx)",
+                                old_id,
+                                best_prox.track_id,
+                                track.lost_frames,
+                                best_dist,
+                            )
+                            return best_prox, False
                         self._locked_missing_frames = int(track.lost_frames)
                         return track, False
                     break
 
             # Proximity transfer
-            reference_center = self._last_locked_bbox_center or self._last_locked_centroid
-            if reference_center is not None:
-                best_prox = None
-                best_dist = _PROXIMITY_TRANSFER_PX
-                for track in tracks:
-                    if track.lost_frames > 0:
-                        continue
-                    cx = (track.bbox[0] + track.bbox[2]) * 0.5
-                    cy = (track.bbox[1] + track.bbox[3]) * 0.5
-                    dist = (
-                        (cx - reference_center[0]) ** 2
-                        + (cy - reference_center[1]) ** 2
-                    ) ** 0.5
-                    if dist < best_dist:
-                        best_dist = dist
-                        best_prox = track
-                if best_prox is not None:
-                    old_id = self._locked_track_id
-                    self._locked_track_id = best_prox.track_id
-                    self._locked_missing_frames = 0
-                    self._proximity_transfer = True
-                    LOGGER.debug(
-                        "Proximity transfer: %d -> %d (%.1fpx)",
-                        old_id,
-                        best_prox.track_id,
-                        best_dist,
-                    )
-                    return best_prox, False
+            reference_center = self._last_locked_reference_center(timestamp_ns)
+            best_prox, best_dist = self._nearest_visible_track(tracks, reference_center)
+            if best_prox is not None:
+                old_id = self._locked_track_id
+                self._locked_track_id = best_prox.track_id
+                self._locked_missing_frames = 0
+                self._proximity_transfer = True
+                LOGGER.debug(
+                    "Proximity transfer: %d -> %d (%.1fpx)",
+                    old_id,
+                    best_prox.track_id,
+                    best_dist,
+                )
+                return best_prox, False
 
             self._locked_track_id = None
             self._locked_missing_frames = 0
@@ -205,20 +270,7 @@ class TrackerStage:
                     last_centroid[1] + vy * dt_s,
                 )
         bbox_reference = self._last_locked_bbox_center
-        if bbox_reference is not None:
-            visible_tracks = [t for t in tracks if t.lost_frames == 0]
-            if not visible_tracks:
-                visible_tracks = tracks
-
-            def _bbox_relock_score(t):
-                cx = (t.bbox[0] + t.bbox[2]) * 0.5
-                cy = (t.bbox[1] + t.bbox[3]) * 0.5
-                dist_sq = (cx - bbox_reference[0]) ** 2 + (cy - bbox_reference[1]) ** 2
-                age_penalty = 0 if t.age >= 2 else 1
-                return (t.lost_frames, age_penalty, dist_sq, -t.score)
-
-            best = min(visible_tracks, key=_bbox_relock_score)
-        elif predicted_centroid is not None:
+        if predicted_centroid is not None:
             visible_tracks = [t for t in tracks if t.lost_frames == 0]
             if not visible_tracks:
                 visible_tracks = tracks
@@ -231,6 +283,19 @@ class TrackerStage:
                 return (t.lost_frames, age_penalty, dist_sq, -t.score)
 
             best = min(visible_tracks, key=_relock_score)
+        elif bbox_reference is not None:
+            visible_tracks = [t for t in tracks if t.lost_frames == 0]
+            if not visible_tracks:
+                visible_tracks = tracks
+
+            def _bbox_relock_score(t):
+                cx = (t.bbox[0] + t.bbox[2]) * 0.5
+                cy = (t.bbox[1] + t.bbox[3]) * 0.5
+                dist_sq = (cx - bbox_reference[0]) ** 2 + (cy - bbox_reference[1]) ** 2
+                age_penalty = 0 if t.age >= 2 else 1
+                return (t.lost_frames, age_penalty, dist_sq, -t.score)
+
+            best = min(visible_tracks, key=_bbox_relock_score)
         else:
             best = min(tracks, key=lambda t: (t.lost_frames, t.track_id))
 

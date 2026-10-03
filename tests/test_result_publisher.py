@@ -65,6 +65,20 @@ def test_publish_drops_oldest_when_queue_full() -> None:
 
 
 @pytest.mark.unit
+def test_latest_only_publish_drains_stale_messages_before_enqueue() -> None:
+    q = _BoundedStubQueue(capacity=4)
+    pub = ResultPublisher(q, logger=logging.getLogger("test.pub"), latest_only=True)
+
+    pub.publish("a")
+    pub.publish("b")
+    pub.publish("c")
+
+    assert len(q) == 1
+    assert q.get_nowait() == "c"
+    assert pub.total_drop_count == 2
+
+
+@pytest.mark.unit
 def test_publish_sentinel_none_also_enqueues() -> None:
     q = _BoundedStubQueue(capacity=2)
     pub = ResultPublisher(q, logger=logging.getLogger("test.pub"))

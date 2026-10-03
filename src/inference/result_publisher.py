@@ -30,10 +30,12 @@ class ResultPublisher:
         *,
         logger: logging.Logger,
         warning_window_s: float = 1.0,
+        latest_only: bool = False,
     ) -> None:
         self._queue = result_queue
         self._logger = logger
         self._warning_window_s = max(0.1, float(warning_window_s))
+        self._latest_only = latest_only
         self._total_drop_count = 0
         self._window_drop_count = 0
         self._window_start = time.perf_counter()
@@ -50,6 +52,9 @@ class ResultPublisher:
         retries, and emits a rate-limited warning summarizing drops in the
         window.
         """
+        if self._latest_only:
+            self._drain_stale_messages()
+
         try:
             self._queue.put_nowait(message)
             return
@@ -78,3 +83,12 @@ class ResultPublisher:
             # Consumer is still stuck; drop this message entirely rather than
             # blocking the inference loop.
             pass
+
+    def _drain_stale_messages(self) -> None:
+        while True:
+            try:
+                self._queue.get_nowait()
+            except Empty:
+                return
+            self._total_drop_count += 1
+            self._window_drop_count += 1
