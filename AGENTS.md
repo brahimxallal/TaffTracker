@@ -8,7 +8,7 @@ This repository is a low-latency vision-guided gimbal tracker with a Python mult
 - Run the tracker directly: `python -m src.main --mode camera --target human --source "0" --config config.yaml`
 - `launch.bat` is the Windows interactive launcher. It prefers the project `.venv`, then an already-active virtual environment, then `python` on `PATH`. Use `python -m src.main` (or `tracker-gui` for the desktop GUI) on other platforms.
 - TensorRT engines are required before first run. Export them with `python scripts/export_engines.py --target all` or a single target.
-- Run tests with `python -m pytest tests/`. CI runs `python -m pytest -m "not perf" --cov=src`, plus `ruff check src tests`, `black --check src tests` and a non-blocking `mypy src`.
+- Run tests with `python -m pytest tests/`. CI runs `python -m pytest -m "not perf" --cov=src`, plus `ruff check .`, `black --check .` (versions pinned in `requirements-lint.txt`) and a non-blocking `mypy src`.
 - Run focused tests first when touching a subsystem, then broaden if needed.
 - Firmware tasks already exist in VS Code: `Firmware: Build`, `Firmware: Rebuild`, `Firmware: Upload`, `Firmware: Monitor`.
 - PlatformIO must use `PLATFORMIO_CORE_DIR=C:\PIO`; builds are known to fail when the core path contains spaces.

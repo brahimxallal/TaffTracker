@@ -24,8 +24,10 @@ pytest -m "not perf"     # what CI runs
 pytest --cov=src         # with coverage
 ```
 
-CI also runs `ruff check src tests`, `black --check src tests` and a
-non-blocking `mypy src`; `pre-commit run --all-files` covers the first two.
+CI also runs `ruff check .`, `black --check .` and a non-blocking `mypy src`.
+`requirements-dev.txt` installs the same pinned versions (`requirements-lint.txt`),
+and `pre-commit run --all-files` runs the same ruff and black. mypy is a manual
+hook: `pre-commit run --hook-stage manual mypy --all-files`.
 The firmware host tests (`tests/test_firmware_host_harness.py`) need gcc or
 clang and skip themselves otherwise.
 
