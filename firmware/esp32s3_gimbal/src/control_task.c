@@ -79,7 +79,7 @@ static void coast_decelerate(float dt_since)
 {
     /* Coast: maintain last velocity vector but decelerate towards zero */
     float decay = fmaxf(0.0f, 1.0f - (dt_since - WDT_COAST_S) / (WDT_HOLD_S - WDT_COAST_S));
-    
+
     // s_smoothed = s_current + s_prev_dp * decay
     float decay_step[2];
     dsps_mulc_f32(s_prev_dp, decay_step, 2, decay, 1, 1);
@@ -242,7 +242,7 @@ static void control_loop_cb(void *arg)
     float speed = sqrtf(cmd.pan_vel_dps * cmd.pan_vel_dps +
                         cmd.tilt_vel_dps * cmd.tilt_vel_dps);
     float alpha = compute_adaptive_alpha(speed, cmd.state, cmd.quality);
-    
+
     float target_scaled[2];
     float smoothed_scaled[2];
     // target * alpha

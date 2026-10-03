@@ -210,9 +210,9 @@ laser:
   hue_high_lower: 175   # TIGHTENED (from 170): Focuses only on the absolute edge of the red spectrum.
   sat_min: 120          # LOWERED (from 150): Allows the laser to be detected even when skin absorbs some color.
   val_min: 160          # LOWERED (from 200): Allows the laser to be detected when it's not reflecting off a bright white wall.
-  min_area: 2.0         
-  max_area: 800.0       
-  min_circularity: 0.1  
+  min_area: 2.0
+  max_area: 800.0
+  min_circularity: 0.1
   roi_radius_px: 150.0    # Tighter ROI — Kalman prediction is accurate enough
   max_jump_px: 50.0       # Reject detections that jump >N px from predicted position
   min_brightness: 200     # Minimum brightness (0-255) to accept a blob as laser
