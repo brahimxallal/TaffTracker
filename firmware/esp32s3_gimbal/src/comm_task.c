@@ -377,6 +377,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
 {
     if (base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
         ESP_LOGW(TAG, "WiFi disconnected, reconnecting in 1s...");
+        xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
         vTaskDelay(pdMS_TO_TICKS(1000));
         esp_wifi_connect();
     } else if (base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
@@ -386,17 +387,64 @@ static void wifi_event_handler(void *arg, esp_event_base_t base,
     }
 }
 
+static esp_err_t apply_static_wifi_ip(esp_netif_t *netif)
+{
+    if (WIFI_STATIC_IP[0] == '\0') {
+        return ESP_OK;
+    }
+
+    if (WIFI_GATEWAY[0] == '\0' || WIFI_NETMASK[0] == '\0') {
+        ESP_LOGW(TAG, "Static WiFi IP requested but gateway/netmask missing; using DHCP");
+        return ESP_OK;
+    }
+
+    esp_netif_ip_info_t ip_info = {0};
+    if (esp_netif_str_to_ip4(WIFI_STATIC_IP, &ip_info.ip) != ESP_OK ||
+        esp_netif_str_to_ip4(WIFI_GATEWAY, &ip_info.gw) != ESP_OK ||
+        esp_netif_str_to_ip4(WIFI_NETMASK, &ip_info.netmask) != ESP_OK) {
+        ESP_LOGW(TAG, "Invalid static WiFi IP settings; using DHCP");
+        return ESP_OK;
+    }
+
+    esp_err_t err = esp_netif_dhcpc_stop(netif);
+    if (err != ESP_OK && err != ESP_ERR_ESP_NETIF_DHCP_ALREADY_STOPPED) {
+        ESP_LOGW(TAG, "Failed to stop WiFi DHCP client: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    err = esp_netif_set_ip_info(netif, &ip_info);
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to set static WiFi IP: %s", esp_err_to_name(err));
+        return err;
+    }
+
+    if (WIFI_DNS[0] != '\0') {
+        esp_netif_dns_info_t dns_info = {0};
+        if (esp_netif_str_to_ip4(WIFI_DNS, &dns_info.ip.u_addr.ip4) == ESP_OK) {
+            dns_info.ip.type = ESP_IPADDR_TYPE_V4;
+            esp_netif_set_dns_info(netif, ESP_NETIF_DNS_MAIN, &dns_info);
+        } else {
+            ESP_LOGW(TAG, "Invalid static WiFi DNS '%s'; continuing without DNS override", WIFI_DNS);
+        }
+    }
+
+    ESP_LOGI(TAG, "Using static WiFi IP %s gateway %s netmask %s",
+             WIFI_STATIC_IP, WIFI_GATEWAY, WIFI_NETMASK);
+    return ESP_OK;
+}
+
 /* ── WiFi UDP receive task ───────────────────────────────────────────── */
 
 static void udp_rx_task(void *arg)
 {
-    /* Wait for WiFi connection with timeout — proceed USB-only if WiFi unavailable */
-    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT,
-                        pdFALSE, pdTRUE, pdMS_TO_TICKS(10000));
-    if (!(bits & WIFI_CONNECTED_BIT)) {
-        ESP_LOGW(TAG, "WiFi connection timeout (10s) — UDP task exiting, USB-only mode");
-        vTaskDelete(NULL);
-        return;
+    /* Cold WiFi association can exceed 10s; keep UDP alive until STA has an IP. */
+    while (1) {
+        EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group, WIFI_CONNECTED_BIT,
+                            pdFALSE, pdTRUE, pdMS_TO_TICKS(10000));
+        if (bits & WIFI_CONNECTED_BIT) {
+            break;
+        }
+        ESP_LOGW(TAG, "WiFi not connected yet; UDP RX still waiting");
     }
 
     int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -450,7 +498,10 @@ esp_err_t comm_wifi_start(void)
     if (err != ESP_OK) return err;
     err = esp_event_loop_create_default();
     if (err != ESP_OK) return err;
-    esp_netif_create_default_wifi_sta();
+    esp_netif_t *sta_netif = esp_netif_create_default_wifi_sta();
+    if (sta_netif == NULL) return ESP_FAIL;
+    err = apply_static_wifi_ip(sta_netif);
+    if (err != ESP_OK) return err;
 
     wifi_init_config_t wifi_cfg = WIFI_INIT_CONFIG_DEFAULT();
     err = esp_wifi_init(&wifi_cfg);

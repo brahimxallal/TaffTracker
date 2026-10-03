@@ -29,3 +29,13 @@ if ssid:
     env.Append(CPPDEFINES=[('CONFIG_TAFFF_WIFI_SSID', '\\"' + ssid + '\\"')])  # noqa: F821
 if pw:
     env.Append(CPPDEFINES=[('CONFIG_TAFFF_WIFI_PASS', '\\"' + pw + '\\"')])  # noqa: F821
+
+for env_key, define_name in (
+    ("TAFFF_WIFI_STATIC_IP", "CONFIG_TAFFF_WIFI_STATIC_IP"),
+    ("TAFFF_WIFI_GATEWAY", "CONFIG_TAFFF_WIFI_GATEWAY"),
+    ("TAFFF_WIFI_NETMASK", "CONFIG_TAFFF_WIFI_NETMASK"),
+    ("TAFFF_WIFI_DNS", "CONFIG_TAFFF_WIFI_DNS"),
+):
+    value = secrets.get(env_key, os.environ.get(env_key, ""))
+    if value:
+        env.Append(CPPDEFINES=[(define_name, '\\"' + value + '\\"')])  # noqa: F821
