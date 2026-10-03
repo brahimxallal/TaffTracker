@@ -11,7 +11,6 @@ from src.config_loader import build_config_from_yaml, build_launcher_env, load_y
 
 @pytest.mark.unit
 class TestConfigLoader:
-
     def test_load_yaml_returns_empty_when_missing(self, tmp_path: Path):
         data = load_yaml_config(tmp_path / "nonexistent.yaml")
         assert data == {}
@@ -29,6 +28,31 @@ class TestConfigLoader:
         assert config.target == "human"
         assert config.source == "0"
 
+    def test_live_config_uses_auto_transport_for_usb_wifi_failover(self):
+        repo_config = Path(__file__).parents[1] / "config.yaml"
+        config = build_config_from_yaml(load_yaml_config(repo_config))
+
+        assert config.comms.channel == "auto"
+        assert config.comms.serial_port == "COM4"
+        assert config.comms.udp_host == "192.168.1.12"
+        assert config.comms.udp_port == 6000
+
+    def test_live_config_uses_precision_aim_preset(self):
+        repo_config = Path(__file__).parents[1] / "config.yaml"
+        config = build_config_from_yaml(load_yaml_config(repo_config))
+
+        assert config.tracking.inference_schedule.detector_locked_stride == 1
+        assert config.gimbal.predictive_lead_s == 0.035
+        assert config.gimbal.slew_limit_dps == 125.0
+        assert config.gimbal.deadband_deg == 0.65
+        assert config.gimbal.kp_far == 2.6
+        assert config.gimbal.kp_near == 1.0
+        assert config.servo_control.auto_command_slew_limit_dps == 130.0
+        assert config.servo_control.velocity_smoother_enabled is True
+        assert config.servo_control.velocity_smoother_alpha == 0.45
+        assert config.servo_control.velocity_smoother_deadband_dps == 6.0
+        assert config.servo_control.velocity_smoother_slew_dps_per_s == 1800.0
+
     def test_build_config_from_yaml_data(self):
         yaml_data = {
             "mode": "video",
@@ -43,6 +67,21 @@ class TestConfigLoader:
         assert config.camera.fps == 30
         assert config.comms.serial_port == "COM7"
         assert config.comms.enabled is False
+
+    def test_relay_auto_fire_from_yaml(self):
+        yaml_data = {"relay": {"pulse_ms": 250, "auto_fire_enabled": True}}
+
+        config = build_config_from_yaml(yaml_data)
+
+        assert config.relay.pulse_ms == 250
+        assert config.relay.auto_fire_enabled is True
+        assert config.relay.auto_fire_pulse_ms == 100
+
+    def test_relay_auto_fire_enabled_rejects_non_bool(self):
+        yaml_data = {"relay": {"auto_fire_enabled": "true"}}
+
+        with pytest.raises(ValueError, match="relay.auto_fire_enabled"):
+            build_config_from_yaml(yaml_data)
 
     def test_cli_overrides_yaml(self):
         yaml_data = {"mode": "camera", "target": "human", "source": "0"}
@@ -121,6 +160,59 @@ class TestConfigLoader:
         assert config.search.timeout_s == 4.0
         assert config.search.scan_speed_dps == 22.0
         assert config.search.return_home is False
+
+    def test_inference_schedule_from_yaml(self):
+        yaml_data = {
+            "tracking": {
+                "inference_schedule": {
+                    "detector_skip_enabled": True,
+                    "detector_locked_stride": 4,
+                    "detector_min_skip_confidence": 0.72,
+                    "detector_max_prediction_age_ms": 80.0,
+                }
+            }
+        }
+
+        config = build_config_from_yaml(yaml_data)
+
+        schedule = config.tracking.inference_schedule
+        assert schedule.detector_skip_enabled is True
+        assert schedule.detector_locked_stride == 4
+        assert schedule.detector_min_skip_confidence == 0.72
+        assert schedule.detector_max_prediction_age_ms == 80.0
+
+    def test_invalid_inference_schedule_rejected(self):
+        yaml_data = {"tracking": {"inference_schedule": {"detector_locked_stride": 0}}}
+
+        with pytest.raises(ValueError, match="detector_locked_stride"):
+            build_config_from_yaml(yaml_data)
+
+    def test_servo_control_relock_and_backlash_from_yaml(self):
+        yaml_data = {
+            "servo_control": {
+                "micro_relock_min_loss_s": 0.03,
+                "micro_relock_window_s": 0.09,
+                "micro_relock_gain": 0.4,
+                "micro_relock_ramp_frames": 3,
+                "backlash_compensation_enabled": True,
+                "backlash_pan_deg": 0.25,
+                "backlash_tilt_deg": 0.15,
+                "backlash_min_step_deg": 0.06,
+                "backlash_pulse_decay_dps": 4.0,
+            }
+        }
+
+        config = build_config_from_yaml(yaml_data)
+
+        assert config.servo_control.micro_relock_min_loss_s == 0.03
+        assert config.servo_control.micro_relock_window_s == 0.09
+        assert config.servo_control.micro_relock_gain == 0.4
+        assert config.servo_control.micro_relock_ramp_frames == 3
+        assert config.servo_control.backlash_compensation_enabled is True
+        assert config.servo_control.backlash_pan_deg == 0.25
+        assert config.servo_control.backlash_tilt_deg == 0.15
+        assert config.servo_control.backlash_min_step_deg == 0.06
+        assert config.servo_control.backlash_pulse_decay_dps == 4.0
 
     def test_ffmpeg_backend_from_yaml_is_valid(self):
         config = build_config_from_yaml({"camera": {"backend": "ffmpeg"}})
@@ -212,6 +304,48 @@ class TestConfigLoader:
         assert config.phone_camera.iso == 320
         assert config.phone_camera.torch_enabled is True
 
+    def test_phone_imu_config_from_yaml(self):
+        yaml_data = {
+            "phone_imu": {
+                "enabled": True,
+                "bind_host": "127.0.0.1",
+                "sensor_port": 28003,
+                "requested_rate_hz": 100,
+                "adb_reverse_enabled": False,
+                "start_service_on_open": False,
+                "read_timeout_s": 0.2,
+            }
+        }
+
+        config = build_config_from_yaml(yaml_data)
+
+        assert config.phone_imu.enabled is True
+        assert config.phone_imu.bind_host == "127.0.0.1"
+        assert config.phone_imu.sensor_port == 28003
+        assert config.phone_imu.requested_rate_hz == 100
+        assert config.phone_imu.adb_reverse_enabled is False
+        assert config.phone_imu.start_service_on_open is False
+        assert config.phone_imu.read_timeout_s == 0.2
+
+    def test_servo_command_slew_limits_from_yaml(self):
+        yaml_data = {
+            "servo_control": {
+                "manual_command_slew_limit_dps": 160.0,
+                "auto_command_slew_limit_dps": 45.0,
+                "manual_fine_speed_dps": 180.0,
+                "manual_coarse_speed_dps": 420.0,
+                "manual_accel_time_s": 0.03,
+            }
+        }
+
+        config = build_config_from_yaml(yaml_data)
+
+        assert config.servo_control.manual_command_slew_limit_dps == 160.0
+        assert config.servo_control.auto_command_slew_limit_dps == 45.0
+        assert config.servo_control.manual_fine_speed_dps == 180.0
+        assert config.servo_control.manual_coarse_speed_dps == 420.0
+        assert config.servo_control.manual_accel_time_s == 0.03
+
     def test_droidcam_config_from_yaml(self):
         yaml_data = {
             "droidcam": {
@@ -296,6 +430,9 @@ class TestConfigLoader:
         yaml_data = {
             "tracking": {
                 "confidence_threshold": 0.55,
+                "lock_acquire_confidence": 0.70,
+                "lock_keep_confidence": 0.50,
+                "low_confidence_grace_frames": 3,
                 "hold_time_s": 2.0,
                 "max_lost_frames": 99,
                 "tracker_match_threshold": 0.6,
@@ -307,6 +444,9 @@ class TestConfigLoader:
         }
         config = build_config_from_yaml(yaml_data)
         assert config.tracking.confidence_threshold == 0.55
+        assert config.tracking.lock_acquire_confidence == 0.70
+        assert config.tracking.lock_keep_confidence == 0.50
+        assert config.tracking.low_confidence_grace_frames == 3
         assert config.tracking.hold_time_s == 2.0
         assert config.tracking.max_lost_frames == 99
         assert config.tracking.tracker_match_threshold == 0.6
@@ -314,6 +454,17 @@ class TestConfigLoader:
         assert config.tracking.smoothing.display_mincutoff == 0.5
         assert config.tracking.postprocess.body_fallback_head_weight == 0.5
         assert config.tracking.adaptive.fast_speed_thresh == 300.0
+
+    def test_tracking_lock_confidence_hysteresis_is_validated(self):
+        yaml_data = {
+            "tracking": {
+                "lock_acquire_confidence": 0.40,
+                "lock_keep_confidence": 0.50,
+            }
+        }
+
+        with pytest.raises(ValueError, match="lock_keep_confidence"):
+            build_config_from_yaml(yaml_data)
 
     def test_cli_comm_override_reenables_disabled_yaml_output(self):
         yaml_data = {"comms": {"enabled": False, "channel": "serial", "serial_port": "COM7"}}
@@ -346,6 +497,24 @@ class TestConfigLoader:
         assert config.flags.debug is True
         assert config.flags.headless is True
         assert config.flags.profile is True
+
+    def test_runtime_ring_buffer_slots_from_yaml(self):
+        config = build_config_from_yaml({"runtime": {"ring_buffer_slots": 8}})
+
+        assert config.flags.ring_buffer_slots == 8
+
+    def test_invalid_runtime_ring_buffer_slots_raises(self):
+        with pytest.raises(ValueError, match="runtime.ring_buffer_slots"):
+            build_config_from_yaml({"runtime": {"ring_buffer_slots": 2}})
+
+    def test_preflight_check_interval_from_yaml(self):
+        config = build_config_from_yaml({"preflight": {"check_interval_frames": 30}})
+
+        assert config.preflight.check_interval_frames == 30
+
+    def test_invalid_preflight_check_interval_raises(self):
+        with pytest.raises(ValueError, match="preflight.check_interval_frames"):
+            build_config_from_yaml({"preflight": {"check_interval_frames": 0}})
 
     def test_laser_config_from_yaml(self):
         yaml_data = {"laser": {"enabled": False, "roi_radius_px": 200.0}}

@@ -130,8 +130,19 @@ class SmoothingConfig:
 
 
 @dataclass(frozen=True)
+class InferenceScheduleConfig:
+    detector_skip_enabled: bool = True
+    detector_locked_stride: int = 3
+    detector_min_skip_confidence: float = 0.60
+    detector_max_prediction_age_ms: float = 120.0
+
+
+@dataclass(frozen=True)
 class TrackingConfig:
     confidence_threshold: float = 0.45
+    lock_acquire_confidence: float = 0.65
+    lock_keep_confidence: float = 0.45
+    low_confidence_grace_frames: int = 4
     hold_time_s: float = 0.65
     max_lost_frames: int = 30
     process_noise: float = 2.5
@@ -144,6 +155,7 @@ class TrackingConfig:
     kalman: KalmanConfig = field(default_factory=KalmanConfig)
     adaptive: AdaptiveConfig = field(default_factory=AdaptiveConfig)
     smoothing: SmoothingConfig = field(default_factory=SmoothingConfig)
+    inference_schedule: InferenceScheduleConfig = field(default_factory=InferenceScheduleConfig)
 
 
 @dataclass(frozen=True)
@@ -249,6 +261,7 @@ class LaserConfig:
 class PreflightConfig:
     enabled: bool = True
     window_size: int = 60
+    check_interval_frames: int = 60
     brightness_stddev_warn: float = 18.0
     sharpness_drop_warn: float = 0.4
     warn_cooldown_s: float = 10.0
@@ -261,6 +274,8 @@ class PreflightConfig:
 @dataclass(frozen=True)
 class RelayConfig:
     pulse_ms: int = 500
+    auto_fire_enabled: bool = False
+    auto_fire_pulse_ms: int = 100
 
 
 @dataclass(frozen=True)
@@ -271,6 +286,13 @@ class ServoControlConfig:
     # gimbal manually — keeps the firmware from quantizing a small stick
     # deflection to zero.
     manual_response_velocity_floor_dps: float = 80.0
+    # Final outgoing command slew caps. 0 disables the extra limiter.
+    manual_command_slew_limit_dps: float = 0.0
+    auto_command_slew_limit_dps: float = 0.0
+    # Keyboard/manual-mode requested motion. Fine = ZQSD, coarse = arrow keys.
+    manual_fine_speed_dps: float = 120.0
+    manual_coarse_speed_dps: float = 300.0
+    manual_accel_time_s: float = 0.05
     # Low-pass filter on the error-derivative term (0 = heavy smoothing,
     # 1 = raw finite difference). Derivative is taken on the angular
     # error, NOT Kalman velocity, because Kalman velocity is polluted by
@@ -283,6 +305,18 @@ class ServoControlConfig:
     velocity_smoother_alpha: float = 0.4
     velocity_smoother_deadband_dps: float = 5.0
     velocity_smoother_slew_dps_per_s: float = 0.0
+    # Same-track losses shorter than this are treated as detector flicker,
+    # not a fresh target acquisition. The controller ramps correction back in.
+    micro_relock_min_loss_s: float = 0.025
+    micro_relock_window_s: float = 0.12
+    micro_relock_gain: float = 0.35
+    micro_relock_ramp_frames: int = 4
+    # Optional short pulse on direction reversal to take up servo/gear slack.
+    backlash_compensation_enabled: bool = False
+    backlash_pan_deg: float = 0.0
+    backlash_tilt_deg: float = 0.0
+    backlash_min_step_deg: float = 0.08
+    backlash_pulse_decay_dps: float = 3.0
 
 
 @dataclass(frozen=True)
@@ -322,6 +356,25 @@ class PhoneCameraConfig:
     white_balance_kelvin: int | None = None
     torch_enabled: bool = False
     zoom_ratio: float | None = None
+
+
+@dataclass(frozen=True)
+class PhoneImuConfig:
+    """Host-side TaffCam motion-sensor transport and startup controls."""
+
+    enabled: bool = False
+    bind_host: str = "127.0.0.1"
+    sensor_port: int = 27185
+    requested_rate_hz: int = 200
+    adb_reverse_enabled: bool = True
+    allow_remote_clients: bool = False
+    adb_path: str = "adb"
+    adb_serial: str | None = None
+    adb_reverse_timeout_s: float = 4.0
+    start_service_on_open: bool = True
+    force_stop_app_on_open: bool = False
+    read_timeout_s: float = 0.03
+    app_start_delay_s: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -374,6 +427,7 @@ class RuntimeFlags:
     profile: bool = False
     log_file: Path | None = None
     log_level: LogLevel = "INFO"
+    ring_buffer_slots: int = 8
     # When true, prefer the GPU letterbox path
     # (:func:`src.inference.gpu_preprocess.gpu_letterbox`) over the inline
     # CPU resize+pad in the capture process. Off by default until a
@@ -401,6 +455,7 @@ class PipelineConfig:
     relay: RelayConfig = field(default_factory=RelayConfig)
     servo_control: ServoControlConfig = field(default_factory=ServoControlConfig)
     phone_camera: PhoneCameraConfig = field(default_factory=PhoneCameraConfig)
+    phone_imu: PhoneImuConfig = field(default_factory=PhoneImuConfig)
     droidcam: DroidCamConfig = field(default_factory=DroidCamConfig)
     search: SearchConfig = field(default_factory=SearchConfig)
 

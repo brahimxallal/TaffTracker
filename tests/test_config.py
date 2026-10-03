@@ -15,8 +15,10 @@ from src.config import (
     KalmanConfig,
     ModelConfig,
     PhoneCameraConfig,
+    PhoneImuConfig,
     PipelineConfig,
     PostprocessConfig,
+    RelayConfig,
     SearchConfig,
     TrackingConfig,
     adapt_tracking_for_fps,
@@ -223,6 +225,14 @@ def test_pipeline_config_carries_search_config() -> None:
 
 
 @pytest.mark.unit
+def test_relay_config_auto_fire_defaults_disabled_100ms() -> None:
+    cfg = RelayConfig()
+    assert cfg.pulse_ms == 500
+    assert cfg.auto_fire_enabled is False
+    assert cfg.auto_fire_pulse_ms == 100
+
+
+@pytest.mark.unit
 def test_pipeline_config_carries_phone_camera_config() -> None:
     cfg = PipelineConfig(mode="camera", target="human", source="0")
     assert isinstance(cfg.phone_camera, PhoneCameraConfig)
@@ -236,6 +246,18 @@ def test_pipeline_config_carries_phone_camera_config() -> None:
     assert cfg.phone_camera.keyframe_interval_s == 1.0
     assert cfg.phone_camera.decode_backend == "pyav"
     assert cfg.phone_camera.capture_mode == "auto"
+
+
+@pytest.mark.unit
+def test_pipeline_config_carries_phone_imu_config() -> None:
+    cfg = PipelineConfig(mode="camera", target="human", source="0")
+    assert isinstance(cfg.phone_imu, PhoneImuConfig)
+    assert cfg.phone_imu.enabled is False
+    assert cfg.phone_imu.bind_host == "127.0.0.1"
+    assert cfg.phone_imu.sensor_port == 27185
+    assert cfg.phone_imu.requested_rate_hz == 200
+    assert cfg.phone_imu.adb_reverse_enabled is True
+    assert cfg.phone_imu.start_service_on_open is True
 
 
 @pytest.mark.unit
