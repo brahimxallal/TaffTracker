@@ -104,20 +104,19 @@ camera:
 > mount, and the FOV-only path is accurate enough for sub-degree
 > aiming at the working distances we hit in practice.
 
-### 5.2 Laser boresight
-Use the interactive calibrator to align the laser with the optical center and persist the measured offset:
+### 5.2 Gimbal center and laser boresight
+Align the laser with the camera's optical center and persist the offsets. The
+calibrator needs the **USB serial** connection (calibration packets are not
+handled on the UDP path):
 ```bash
-python scripts/calibrate.py --port COM4
+python scripts/calibrate.py --port COM4     # manual jog, then auto-refine
+python scripts/calibrate.py --auto          # skip the manual jog
+python scripts/calibrate.py --reset         # zero all offsets
 ```
-`scripts/laser_capture.py` is only a diagnostic helper that saves `logs/laser_frame.png` and prints HSV values for threshold tuning.
-
-### 5.3 Gimbal center calibration
-Align the laser with the optical center and persist servo offsets to ESP32 NVS:
-```bash
-python scripts/calibrate.py --port COM4
-```
-Saves `calibration_data/servo_limits.json` and pushes the offsets to
-firmware so the next boot uses them automatically.
+It saves `calibration_data/servo_limits.json` and pushes the offsets to the
+firmware's NVS, so the next boot uses them automatically.
+`scripts/laser_capture.py` is only a diagnostic helper that saves
+`logs/laser_frame.png` and prints HSV values for threshold tuning.
 
 #### Measuring camera HFOV
 Place an object of known width `W` (e.g. a 30 cm ruler) at a known
@@ -142,6 +141,13 @@ cp firmware/esp32s3_gimbal/wifi_secrets.env.example firmware/esp32s3_gimbal/wifi
 # then edit the two lines
 ```
 `wifi_secrets.env` is gitignored — your SSID and password never leave your disk.
+
+Optionally pin the ESP32's WiFi address by also setting `TAFFF_WIFI_STATIC_IP`,
+`TAFFF_WIFI_GATEWAY`, `TAFFF_WIFI_NETMASK` (and `TAFFF_WIFI_DNS`) in the same
+file, and use that address as `comms.udp_host` in `config.yaml`. A DHCP
+reservation on your router is the more robust option; if you use the firmware
+static IP, pick an address outside the router's DHCP pool. Missing or invalid
+values fall back to DHCP.
 
 ### 6.2 Build + flash
 ```bash
@@ -169,6 +175,10 @@ What you should see:
 - Terminal showing ~59 fps, end-to-end PC latency ~8–10 ms
 - If ESP32 is connected over USB, servos track the target within 50 ms total system latency
 
+Other ways to start:
+- `launch.bat` (Windows): interactive launcher. It prefers the project `.venv`, checks that the selected TensorRT engine can be loaded and offers to re-export it if not.
+- `tracker-gui` after `pip install -e ".[gui]"`: the PySide6 desktop front-end.
+
 Useful flags:
 | Flag | Purpose |
 |---|---|
@@ -180,16 +190,38 @@ Useful flags:
 | `--config path/to/config.yaml` | Override the default config file |
 | `--debug` / `--log-level DEBUG` | Verbose logs |
 
+### Optional: phone as camera (TaffCam)
+
+`android/taffcam/` is a small Android app that streams the phone's camera to
+the PC over USB. Open it in Android Studio, install the debug build on a phone
+with USB debugging enabled, then pick a phone backend in `config.yaml`:
+
+```yaml
+camera:
+  source_backend: phone_yuv   # raw I420 frames; phone_mpeg / phone_h264 for encoded streams
+```
+
+The stream and camera controls (resolution, exposure, ISO, torch, ...) live in
+the `phone_camera:` block. On start the tracker sets up `adb reverse` for the
+frame and control ports (27183 / 27184) and launches the app for you
+(`phone_camera.start_app_on_open`). Both listeners bind to `127.0.0.1` unless
+you set `allow_remote_clients: true`, which you should only do on a network you
+trust. The shipped default is the DroidCam virtual camera
+(`source_backend: opencv`).
+
+The optional phone motion-sensor stream (`phone_imu.enabled`, off by default)
+needs a TaffCam build that includes the sensor service.
+
 ---
 
 ## 8. Verify tests pass
 
 ```bash
-pytest -m "not perf"      # full CPU-only suite, ~12 s, should show 593 passing
-pytest --cov=src          # with coverage (~81 % overall)
+pytest -m "not perf"      # full CPU-only suite, typically well under a minute, everything should pass
+pytest --cov=src          # with a coverage report
 ```
 
-CUDA-dependent tests are skipped automatically via `tests/conftest.py` when TRT is not importable.
+CUDA-dependent tests are skipped automatically via `tests/conftest.py` when TRT is not importable. The firmware host tests (`tests/test_firmware_host_harness.py`) need gcc or clang and skip themselves when no C compiler is found.
 
 ---
 

@@ -24,6 +24,11 @@ pytest -m "not perf"     # what CI runs
 pytest --cov=src         # with coverage
 ```
 
+CI also runs `ruff check src tests`, `black --check src tests` and a
+non-blocking `mypy src`; `pre-commit run --all-files` covers the first two.
+The firmware host tests (`tests/test_firmware_host_harness.py`) need gcc or
+clang and skip themselves otherwise.
+
 ## Commit convention
 
 [Conventional Commits](https://www.conventionalcommits.org/): `<type>(<scope>): <subject>`
@@ -43,6 +48,7 @@ Examples:
 - [ ] No secrets, weights (`*.pt`), engines (`*.engine`), or large binaries staged
 - [ ] `git status` reviewed before `git add`
 - [ ] Relevant section of `AGENTS.md` updated if architecture shifts
+- [ ] Firmware change? The host tests pass and the change was bench-tested on hardware (say so in the PR)
 
 ## Architecture guardrails
 
@@ -53,6 +59,8 @@ These invariants must not be broken without explicit discussion:
 - Fire-and-forget output transport (no blocking acks on the control path).
 - Frozen-dataclass config (`src/config.py`) as the single source of runtime tuning.
 - Kalman units: `vx`, `vy` are in **pixels/second**, not pixels/frame.
+- Fail-safes stay: the firmware watchdog (coast / hold / home), the relay release when the host goes silent, and bounds-checked frame parsing.
+- `relay.auto_fire_enabled` stays `false` in the committed `config.yaml`.
 
 See `AGENTS.md` for the full list.
 
