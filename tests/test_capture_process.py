@@ -43,7 +43,7 @@ def _build_capture_process(**overrides) -> CaptureProcess:
     defaults = dict(
         layout=ring_buffer.layout,
         write_index=write_index,
-        source="c:\\AAA\\videos\\Dog_Moving_Camera_Still.mp4",
+        source="videos/sample.mp4",
         camera_config=CameraConfig(width=640, height=640, fps=60, backend="auto", buffer_size=1),
         capture_done_event=mp.Event(),
         shutdown_event=mp.Event(),
