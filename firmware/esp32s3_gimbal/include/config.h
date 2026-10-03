@@ -103,12 +103,28 @@
 #ifndef CONFIG_TAFFF_WIFI_PASS
 #define CONFIG_TAFFF_WIFI_PASS ""
 #endif
+#ifndef CONFIG_TAFFF_WIFI_STATIC_IP
+#define CONFIG_TAFFF_WIFI_STATIC_IP ""
+#endif
+#ifndef CONFIG_TAFFF_WIFI_GATEWAY
+#define CONFIG_TAFFF_WIFI_GATEWAY ""
+#endif
+#ifndef CONFIG_TAFFF_WIFI_NETMASK
+#define CONFIG_TAFFF_WIFI_NETMASK ""
+#endif
+#ifndef CONFIG_TAFFF_WIFI_DNS
+#define CONFIG_TAFFF_WIFI_DNS ""
+#endif
 #ifndef WIFI_SSID
 #define WIFI_SSID            CONFIG_TAFFF_WIFI_SSID
 #endif
 #ifndef WIFI_PASS
 #define WIFI_PASS            CONFIG_TAFFF_WIFI_PASS
 #endif
+#define WIFI_STATIC_IP       CONFIG_TAFFF_WIFI_STATIC_IP
+#define WIFI_GATEWAY         CONFIG_TAFFF_WIFI_GATEWAY
+#define WIFI_NETMASK         CONFIG_TAFFF_WIFI_NETMASK
+#define WIFI_DNS             CONFIG_TAFFF_WIFI_DNS
 #define UDP_PORT             6000
 
 /* ── Protocol v2 (21 bytes, header 0xBB) ──────────────────────────────── */

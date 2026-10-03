@@ -7,28 +7,113 @@
 # --- Pipeline ---
 mode: camera          # camera | video
 target: human         # human | dog
-source: "0"           # Camera index (DroidCam virtual cam; capture_width/height force 1080p)
+source: "0"           # DroidCam Windows virtual camera index for the proven 60 FPS live path
 
 # --- Camera ---
 camera:
   width: 640
   height: 640
   fps: 60
-  backend: auto       # auto picks MSMF for DroidCam, dshow for USB webcam
+  source_backend: opencv  # opencv = proven DroidCam virtual 60 FPS; phone_h264 = custom TaffCam, currently HAL-capped at 30 FPS
+  backend: msmf       # MSMF is best for DroidCam's Windows virtual camera
   fov: 66.2         # Horizontal FOV in degrees (measured)
   buffer_size: 1       # OpenCV capture buffer (1 = lowest latency)
   orientation: landscape_native  # portrait | landscape_native
-  capture_width: 1920  # Native resolution to request from camera
-  capture_height: 1080 # (DroidCam streams 1080p; letterbox rescales to 640x640)
+  capture_width: 640   # Native source width; matches model width for the lowest-latency path
+  capture_height: 480  # OpenCV fallback request only
+
+# --- DroidCam Classic Integration ---
+# Current direct path: DroidCam phone app -> raw /v5 MJPEG TCP stream -> TaffTracker.
+# Close the Windows DroidCam client before using this backend; DroidCam usually allows
+# only one video client. Use `adb forward tcp:4747 tcp:4747` for USB localhost.
+# Remote controls require DroidCam to allow the remote API; the free/ad HD unlock may
+# still return HTTP 550 Restricted for focus/exposure/WB/torch controls.
+droidcam:
+  host: 127.0.0.1
+  port: 4747
+  width: 640
+  height: 480
+  fps: 60
+  video_format: jpg     # Current Infinix/DroidCam session accepts MJPEG; AVC/HEVC close the stream.
+  connect_timeout_s: 2.0
+  read_timeout_s: 0.03
+  remote_enabled: true
+  remote_timeout_s: 0.25
+  active_camera: 0      # 0 Back, 1 Front on the current Infinix DroidCam report
+  autofocus_once: false
+  autofocus_mode: 3     # 3 infinity/locked-style mode in DroidCam UI; manual_focus wins if supported
+  manual_focus: null
+  exposure_lock: true
+  ev: null
+  wb_mode: 5            # daylight preset; use null to leave DroidCam's current WB mode
+  wb_lock: true
+  wb_level: null
+  torch_enabled: false
+  zoom: null
+
+# --- TaffCam Android Camera2 USB Backend ---
+# Used when camera.source_backend: phone_h264, phone_mpeg, or phone_yuv.
+phone_camera:
+  bind_host: 127.0.0.1
+  allow_remote_clients: false
+  frame_port: 27183
+  control_port: 27184
+  adb_reverse_enabled: true
+  adb_path: adb
+  adb_serial: null
+  adb_reverse_timeout_s: 4.0
+  start_app_on_open: true
+  force_stop_app_on_open: true
+  app_start_delay_s: 1.0
+  width: 480
+  height: 360
+  fps: 30                # Infinix Camera2/Camera1 public caps report max 30 FPS for YUV and MediaCodec surfaces
+  stream_format: mpeg  # mpeg is the encoder-surface path; yuv is diagnostic/raw fallback
+  pixel_format: i420
+  codec: h264          # DroidCam-like hardware AVC path; MPEG4 is available as a diagnostic fallback
+  bitrate_bps: 8000000
+  keyframe_interval_s: 1.0
+  decode_backend: pyav
+  capture_mode: yuv
+  connect_timeout_s: 5.0
+  read_timeout_s: 0.08
+  control_timeout_s: 2.0
+  camera_id: null
+  focus_diopters: null
+  exposure_ns: 16000000  # 16 ms shutter for the current dark phone view; still below the 33.8 ms YUV frame period
+  iso: 1600              # Raised for the live room lighting; reduce after the image is bright enough
+  awb_enabled: false
+  awb_lock: true
+  white_balance_kelvin: null
+  torch_enabled: true
+  zoom_ratio: null
+
+# --- TaffCam Android Motion Sensors ---
+# Sensor-only sidecar: lets DroidCam keep the camera while TaffCam streams
+# phone motion/orientation sensors over ADB-reversed TCP.
+phone_imu:
+  enabled: false
+  bind_host: 127.0.0.1
+  sensor_port: 27185
+  requested_rate_hz: 200
+  adb_reverse_enabled: true
+  allow_remote_clients: false
+  adb_path: adb
+  adb_serial: null
+  adb_reverse_timeout_s: 4.0
+  start_service_on_open: true
+  force_stop_app_on_open: false
+  read_timeout_s: 0.03
+  app_start_delay_s: 0.0
 
 # --- Communication (gimbal output) ---
 comms:
-  channel: auto          # auto | serial | udp  (auto: try serial first, fallback UDP)
+  channel: auto           # auto | serial | udp  (auto: USB serial first, fallback to WiFi UDP)
   serial_port: COM4
   baud_rate: 921600
-  udp_host: 192.168.1.19   # ESP32 IP on the local 2.4 GHz network
+  udp_host: 192.168.1.12   # ESP32 IP on the local 2.4 GHz network
   udp_port: 6000
-  udp_redundancy: 1         # Send each packet N times (1 = no redundancy, 2 = duplicate)
+  udp_redundancy: 2         # Duplicate WiFi packets to ride through short 2.4GHz fades
   enabled: true
 
 # --- Gimbal (servo direction) ---
@@ -39,16 +124,16 @@ gimbal:
   tilt_limit_deg: 73.0  # Calibrated: mechanical range -20°..+80°, center at +24° → ±44°
   kp: 3.5               # Approach gain (°/s per ° error)
   ki: 0.0               # Reserved (unused in incremental controller)
-  kd: 0.5               # Step 2a: raised from 0.35 to damp tilt oscillation
-  deadband_deg: 0.8     # Step 2a: widened from 0.6 to hide residual tilt ripple
+  kd: 0.2               # Stability-first: lower damping spike during noisy detections
+  deadband_deg: 0.65    # Precision preset: tighter aim deadband for laser-on-target tracking
   integral_decay_rate: 0.2  # Gentle integral bleed inside deadband (/s)
-  slew_limit_dps: 120.0 # Max °/s command change
-  tilt_scale: 0.45      # Step 2a: cut from 0.65 — tilt ego-motion feedback is stronger than pan
-  velocity_feedforward_gain: 0.5  # Velocity FF on Kalman target vel (0 = disabled)
-  kp_far: 5.0            # kp when |error| > gain_schedule_threshold_deg
-  kp_near: 1.5           # kp when |error| <= gain_schedule_threshold_deg
-  gain_schedule_threshold_deg: 3.0
-  predictive_lead_s: 0.08  # Velocity lead time (s); 0 = disabled
+  slew_limit_dps: 125.0 # Precision preset: let the gimbal catch moving targets faster
+  tilt_scale: 0.35      # Tilt ego-motion feedback is stronger than pan
+  velocity_feedforward_gain: 0.0  # Disabled until lock is stable
+  kp_far: 2.6            # kp when |error| > gain_schedule_threshold_deg
+  kp_near: 1.0           # kp when |error| <= gain_schedule_threshold_deg
+  gain_schedule_threshold_deg: 4.0
+  predictive_lead_s: 0.035  # Small lead to compensate camera+inference+servo delay while moving
 
 
 # --- Models ---
@@ -66,6 +151,7 @@ runtime:
   profile: true
   log_file: null
   log_level: INFO     # DEBUG | INFO | WARNING | ERROR
+  ring_buffer_slots: 8
   # Opt-in GPU letterbox path. Off by default — flip only after running
   # `python scripts/benchmark_preprocess.py` on this host and confirming
   # the GPU path is faster (small frames usually lose to H2D overhead).
@@ -77,14 +163,45 @@ runtime:
 # src/output/velocity_smoother.py for the activation policy.
 servo_control:
   manual_response_velocity_floor_dps: 80.0
+  manual_command_slew_limit_dps: 620.0  # Faster manual response; above coarse keyboard request
+  auto_command_slew_limit_dps: 130.0    # Precision preset: lower output lag on moving targets
+  manual_fine_speed_dps: 220.0          # ZQSD manual speed
+  manual_coarse_speed_dps: 520.0        # Arrow-key manual speed
+  manual_accel_time_s: 0.025            # Shorter ramp to full manual speed
   derivative_filter_alpha: 0.35
   # Velocity smoother for predictive lead. Enabled after live tuning; defaults
   # below match the analyzer's recommendation for typical Kalman noise
   # (alpha=0.5 = ~40% noise reduction with one-frame lag at 60 fps).
   velocity_smoother_enabled: true
-  velocity_smoother_alpha: 0.5         # EMA blend; lower = smoother, more lag
-  velocity_smoother_deadband_dps: 5.0  # below this, smoothed velocity reads 0
-  velocity_smoother_slew_dps_per_s: 0.0  # 0 = no slew cap (recommended start)
+  velocity_smoother_alpha: 0.45        # EMA blend; lower = smoother, more lag
+  velocity_smoother_deadband_dps: 6.0  # below this, smoothed velocity reads 0
+  velocity_smoother_slew_dps_per_s: 1800.0  # Hard cap against one-frame velocity spikes
+  # Same-track detector flicker under this window is treated as continuity,
+  # not a fresh relock. This targets 30-120 ms live micro-loss jitter.
+  micro_relock_min_loss_s: 0.025
+  micro_relock_window_s: 0.12
+  micro_relock_gain: 0.35
+  micro_relock_ramp_frames: 4
+  # Conservative software backlash pulse on direction reversal. Start small;
+  # increase by 0.05 deg only if the gimbal visibly hesitates after reversals.
+  backlash_compensation_enabled: true
+  backlash_pan_deg: 0.20
+  backlash_tilt_deg: 0.06
+  backlash_min_step_deg: 0.35
+  backlash_pulse_decay_dps: 10.0
+
+# --- Intelligent Search / Balayage ---
+search:
+  enabled: true
+  start_after_s: 0.25       # Wait briefly for Kalman/ByteTrack recovery before sweeping
+  timeout_s: 6.0            # After this, return home if the target is still gone
+  initial_radius_deg: 2.0   # First sweep stays near the predicted last-known target angle
+  max_radius_deg: 24.0      # Expanded search cone, still inside mechanical limits
+  expansion_rate_dps: 6.0   # Search radius growth in degrees per second
+  scan_speed_dps: 18.0      # Command slew/sweep speed cap; avoids violent servo jumps
+  tilt_amplitude_ratio: 0.35
+  prediction_horizon_s: 0.60 # Use last target velocity, but do not extrapolate forever
+  return_home: true
 
 # --- Laser Dot Detection ---
 laser:
@@ -93,9 +210,9 @@ laser:
   hue_high_lower: 175   # TIGHTENED (from 170): Focuses only on the absolute edge of the red spectrum.
   sat_min: 120          # LOWERED (from 150): Allows the laser to be detected even when skin absorbs some color.
   val_min: 160          # LOWERED (from 200): Allows the laser to be detected when it's not reflecting off a bright white wall.
-  min_area: 2.0         
-  max_area: 800.0       
-  min_circularity: 0.1  
+  min_area: 2.0
+  max_area: 800.0
+  min_circularity: 0.1
   roi_radius_px: 150.0    # Tighter ROI — Kalman prediction is accurate enough
   max_jump_px: 50.0       # Reject detections that jump >N px from predicted position
   min_brightness: 200     # Minimum brightness (0-255) to accept a blob as laser
@@ -108,18 +225,27 @@ laser_boresight:
 
 # --- Tracking ---
 tracking:
-  confidence_threshold: 0.50   # Detection confidence gate (raised: reject false positives)
+  confidence_threshold: 0.50   # Live human gate: reject wall/fixture false locks now that torch is enabled
+  lock_acquire_confidence: 0.65 # New locks must be confident; prevents wall/ceiling false reacquires
+  lock_keep_confidence: 0.45    # Existing lock may survive moderate dips without steering on weak hits
+  low_confidence_grace_frames: 4 # Drop lock ID after repeated weak hits; search keeps last strong memory
   hold_time_s: 2.0             # Hold last position after target lost (seconds)
   max_lost_frames: 90          # Frames before dropping a track (~1.5s @ 60fps)
   process_noise: 3.5           # Kalman Q (lowered: trust model more, smoother state estimate)
   measurement_noise: 15.0      # Kalman R (raised: less reactive to pixel noise from ego-motion)
-  tracker_match_threshold: 0.55  # ByteTrack IoU match threshold
-  tracker_track_threshold: 0.25  # ByteTrack high-confidence split
-  tracker_birth_min_hits: 3      # Require 3 hits before promoting track
+  tracker_match_threshold: 0.30  # ByteTrack IoU match threshold; lower resists ID churn during gimbal motion
+  tracker_track_threshold: 0.30  # ByteTrack high-confidence split
+  tracker_birth_min_hits: 2      # Promote after 2 hits so reacquire is quicker
+  egomotion_compensation_enabled: false  # Track actual current image position; avoids servo-induced Kalman stalls
+  inference_schedule:
+    detector_skip_enabled: true
+    detector_locked_stride: 1          # Precision preset: YOLO every frame for minimum aim error
+    detector_min_skip_confidence: 0.68 # Below this, run YOLO every frame and search for a stronger target
+    detector_max_prediction_age_ms: 120.0 # Hard cap on Kalman-only prediction age
 
   # --- Kalman filter ---
   kalman:
-    innovation_gate_sigma: 5.0     # Reject measurements this many sigma from prediction
+    innovation_gate_sigma: 7.0     # Wider gate for live gimbal motion/phone blur
     adaptive_r_min: 12.0           # Min measurement noise (fast motion) — raised: ego-motion adds measurement uncertainty
     adaptive_r_max: 25.0           # Max measurement noise (slow/noisy) — raised: favors smoothness at rest
     adaptive_r_speed_thresh: 100.0 # Speed (px/s) at which R reaches min (lowered: 200→100, R adapts sooner)
@@ -127,7 +253,7 @@ tracking:
     adaptive_q_speed_thresh: 200.0 # Speed (px/s) where Q starts ramping up (lowered)
     adaptive_q_speed_ceil: 400.0   # Speed (px/s) where Q hits max multiplier (lowered)
     max_consecutive_predictions: 30  # Max prediction-only frames before reset
-    max_consecutive_gated: 3       # Max rejected measurements before soft reset
+    max_consecutive_gated: 6       # Avoid repeated soft resets during short blur bursts
     oru_cache_size: 5              # OC-SORT re-update: cached observations
     prediction_decay_start: 10     # Start decaying velocity after N predictions (faster fade)
     prediction_velocity_decay: 0.90 # Velocity multiplier per extra prediction frame
@@ -162,7 +288,7 @@ tracking:
     reliability_high: 0.90       # Above this → raise confidence threshold
     conf_floor: 0.15             # Lowest confidence threshold allowed (was 0.30)
     conf_ceiling: 0.55           # Highest confidence threshold allowed
-    conf_reduction: 0.05         # How much to reduce when unreliable
+    conf_reduction: 0.10         # How much to reduce when unreliable
     conf_raise: 0.02             # How much to raise when reliable
     fast_speed_thresh: 200.0     # Speed (px/s) considered "fast"
     slow_speed_thresh: 50.0      # Speed (px/s) considered "slow"
@@ -197,14 +323,17 @@ tracking_dog:
     servo_mincutoff: 12.0
     servo_beta: 0.5
 
-# --- Relay (GPIO 6, toggled by 'O' key) ---
+# --- Relay (ESP32-S3 GPIO 4, active-low; toggled by the 'O' key) ---
 relay:
   pulse_ms: 150           # How long relay stays ON per press (milliseconds)
+  auto_fire_enabled: false  # Keep false unless the relay load is safe to fire with nobody at the controls
+  auto_fire_pulse_ms: 100 # Automatic shot duration when target lock is acquired
 
 # --- Preflight (phone camera health monitoring) ---
 preflight:
-  enabled: true
-  window_size: 60                 # Rolling window size (frames)
+  enabled: false                    # Off in live tracking unless diagnosing camera AE/AWB/AF drift
+  window_size: 60                 # Rolling health window size (sampled checks)
+  check_interval_frames: 60       # Run expensive Laplacian health check at ~1 Hz when preflight is enabled
   brightness_stddev_warn: 18.0    # Brightness stddev above this → AE hunting warning
   sharpness_drop_warn: 0.65       # MJPEG compression causes ~50% variation; raised from 0.4
   warn_cooldown_s: 30.0           # Debounce repeated warnings (seconds)

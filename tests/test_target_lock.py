@@ -111,13 +111,25 @@ class TestTargetLock:
         assert result.track_id == 3
         assert stage.locked_track_id == 3
 
-    def test_resets_lock_on_empty_tracks(self):
-        stage = _make_stage()
+    def test_keeps_lock_on_short_empty_track_burst(self):
+        stage = _make_stage(max_lost_frames=3)
         _select(stage, [_make_track(track_id=1, score=0.9)])
         assert stage.locked_track_id == 1
 
         result = _select(stage, [])
         assert result is None
+        assert stage.locked_track_id == 1
+
+    def test_resets_lock_after_empty_tracks_exceed_max_lost(self):
+        stage = _make_stage(max_lost_frames=2)
+        _select(stage, [_make_track(track_id=1, score=0.9)])
+        assert stage.locked_track_id == 1
+
+        assert _select(stage, []) is None
+        assert stage.locked_track_id == 1
+        assert _select(stage, []) is None
+        assert stage.locked_track_id == 1
+        assert _select(stage, []) is None
         assert stage.locked_track_id is None
 
     def test_keeps_locked_track_with_minor_lost_frames(self):
@@ -136,7 +148,7 @@ class TestTargetLock:
 
         # Everyone disappears
         _select(stage, [])
-        assert stage.locked_track_id is None
+        assert stage.locked_track_id == 1
 
         # New target appears
         t5 = _make_track(track_id=5, score=0.88)
@@ -179,6 +191,88 @@ class TestMultiDogLockStability:
             t2_frame = _make_track(track_id=2, score=0.95, lost_frames=0)
             result = _select(stage, [t1_frame, t2_frame])
             assert result.track_id == 1, f"Lock should not switch at frame {frame} (lost={lost})"
+
+    def test_stale_lost_lock_transfers_to_nearest_visible_track(self):
+        """After a short grace, a stale lost id should hand off to the nearest visible target."""
+        stage = _make_stage(max_lost_frames=30)
+        _select(stage, [_make_track(track_id=1, score=0.9, bbox=(80, 80, 120, 120))])
+        stage.last_locked_centroid = (100.0, 100.0)
+
+        stale_locked = _make_track(track_id=1, score=0.2, lost_frames=4, bbox=(80, 80, 120, 120))
+        near_visible = _make_track(track_id=2, score=0.8, bbox=(105, 90, 145, 130))
+        far_visible = _make_track(track_id=3, score=0.99, bbox=(400, 400, 460, 460))
+
+        result = _select(stage, [stale_locked, far_visible, near_visible])
+
+        assert result.track_id == 2
+        assert stage.locked_track_id == 2
+        assert stage.consume_proximity_transfer() is True
+
+    def test_brief_lost_lock_does_not_transfer_to_near_visible_track(self):
+        """The stale-lock handoff must not steal lock during tiny tracker flickers."""
+        stage = _make_stage(max_lost_frames=30)
+        _select(stage, [_make_track(track_id=1, score=0.9, bbox=(80, 80, 120, 120))])
+        stage.last_locked_centroid = (100.0, 100.0)
+
+        briefly_lost = _make_track(track_id=1, score=0.2, lost_frames=3, bbox=(80, 80, 120, 120))
+        near_visible = _make_track(track_id=2, score=0.8, bbox=(105, 90, 145, 130))
+
+        result = _select(stage, [briefly_lost, near_visible])
+
+        assert result.track_id == 1
+        assert stage.locked_track_id == 1
+        assert stage.consume_proximity_transfer() is False
+
+    def test_stale_handoff_uses_predicted_centroid_before_stale_bbox_center(self):
+        """Fast motion should relock near the predicted target, not stale bbox center."""
+        stage = _make_stage(max_lost_frames=30)
+        _select(stage, [_make_track(track_id=1, score=0.9, bbox=(80, 80, 120, 120))])
+        stage.last_locked_centroid = (100.0, 100.0)
+        stage.last_locked_velocity = (100.0, 0.0)
+        stage.last_locked_timestamp_ns = 1_000_000_000
+        stage.update_locked_bbox(np.array([80, 80, 120, 120], dtype=np.float32))
+
+        stale_locked = _make_track(track_id=1, score=0.2, lost_frames=4, bbox=(80, 80, 120, 120))
+        near_stale_bbox = _make_track(track_id=2, score=0.95, bbox=(95, 90, 135, 130))
+        near_predicted = _make_track(track_id=3, score=0.85, bbox=(185, 90, 225, 130))
+
+        selected, _ = stage.select_primary_track(
+            tracks=[stale_locked, near_stale_bbox, near_predicted],
+            frame=np.zeros((10, 10, 3), dtype=np.uint8),
+            timestamp_ns=2_000_000_000,
+            prev_locked_id=stage.locked_track_id,
+        )
+
+        assert selected.track_id == 3
+        assert stage.locked_track_id == 3
+        assert stage.consume_proximity_transfer() is True
+
+    def test_relock_after_full_loss_prefers_predicted_centroid_over_stale_bbox(self):
+        """After lock release, velocity prediction should still beat the stale bbox."""
+        stage = _make_stage(max_lost_frames=1)
+        _select(stage, [_make_track(track_id=1, score=0.9, bbox=(80, 80, 120, 120))])
+        stage.last_locked_centroid = (100.0, 100.0)
+        stage.last_locked_velocity = (120.0, 0.0)
+        stage.last_locked_timestamp_ns = 1_000_000_000
+        stage.update_locked_bbox(np.array([80, 80, 120, 120], dtype=np.float32))
+
+        # Clear the active lock while preserving last-seen memory.
+        assert _select(stage, []) is None
+        assert _select(stage, []) is None
+        assert stage.locked_track_id is None
+
+        near_stale_bbox = _make_track(track_id=2, score=0.99, bbox=(95, 90, 135, 130))
+        near_predicted = _make_track(track_id=3, score=0.80, bbox=(205, 90, 245, 130))
+
+        selected, _ = stage.select_primary_track(
+            tracks=[near_stale_bbox, near_predicted],
+            frame=np.zeros((10, 10, 3), dtype=np.uint8),
+            timestamp_ns=2_000_000_000,
+            prev_locked_id=stage.locked_track_id,
+        )
+
+        assert selected.track_id == 3
+        assert stage.locked_track_id == 3
 
     def test_track_state_cache_save_restore(self):
         """Switching away from a track and back should restore Kalman state."""

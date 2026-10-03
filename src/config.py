@@ -10,6 +10,13 @@ TargetKind = Literal["human", "dog"]
 CommChannel = Literal["serial", "udp", "auto"]
 Precision = Literal["fp16", "int8"]
 Backend = Literal["auto", "msmf", "dshow", "ffmpeg"]
+SourceBackend = Literal["opencv", "phone_yuv", "phone_mpeg", "phone_h264", "droidcam"]
+PhoneStreamFormat = Literal["yuv", "mpeg"]
+PhonePixelFormat = Literal["i420", "nv12", "nv21"]
+PhoneCaptureMode = Literal["auto", "normal", "yuv", "high_speed"]
+PhoneVideoCodec = Literal["mpeg4", "h264"]
+PhoneDecodeBackend = Literal["pyav"]
+DroidCamVideoFormat = Literal["avc", "jpg", "mjpg", "hevc"]
 LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR"]
 
 
@@ -26,6 +33,7 @@ class CameraConfig:
     height: int = 640
     fps: int = 60
     backend: Backend = "auto"
+    source_backend: SourceBackend = "opencv"
     buffer_size: int = 1
     orientation: Orientation = Orientation.LANDSCAPE_NATIVE
     fov: float | None = None
@@ -122,8 +130,19 @@ class SmoothingConfig:
 
 
 @dataclass(frozen=True)
+class InferenceScheduleConfig:
+    detector_skip_enabled: bool = True
+    detector_locked_stride: int = 3
+    detector_min_skip_confidence: float = 0.60
+    detector_max_prediction_age_ms: float = 120.0
+
+
+@dataclass(frozen=True)
 class TrackingConfig:
     confidence_threshold: float = 0.45
+    lock_acquire_confidence: float = 0.65
+    lock_keep_confidence: float = 0.45
+    low_confidence_grace_frames: int = 4
     hold_time_s: float = 0.65
     max_lost_frames: int = 30
     process_noise: float = 2.5
@@ -131,10 +150,12 @@ class TrackingConfig:
     tracker_match_threshold: float = 0.55
     tracker_track_threshold: float = 0.40
     tracker_birth_min_hits: int = 2
+    egomotion_compensation_enabled: bool = True
     postprocess: PostprocessConfig = field(default_factory=PostprocessConfig)
     kalman: KalmanConfig = field(default_factory=KalmanConfig)
     adaptive: AdaptiveConfig = field(default_factory=AdaptiveConfig)
     smoothing: SmoothingConfig = field(default_factory=SmoothingConfig)
+    inference_schedule: InferenceScheduleConfig = field(default_factory=InferenceScheduleConfig)
 
 
 @dataclass(frozen=True)
@@ -240,6 +261,7 @@ class LaserConfig:
 class PreflightConfig:
     enabled: bool = True
     window_size: int = 60
+    check_interval_frames: int = 60
     brightness_stddev_warn: float = 18.0
     sharpness_drop_warn: float = 0.4
     warn_cooldown_s: float = 10.0
@@ -252,6 +274,8 @@ class PreflightConfig:
 @dataclass(frozen=True)
 class RelayConfig:
     pulse_ms: int = 500
+    auto_fire_enabled: bool = False
+    auto_fire_pulse_ms: int = 100
 
 
 @dataclass(frozen=True)
@@ -262,6 +286,13 @@ class ServoControlConfig:
     # gimbal manually — keeps the firmware from quantizing a small stick
     # deflection to zero.
     manual_response_velocity_floor_dps: float = 80.0
+    # Final outgoing command slew caps. 0 disables the extra limiter.
+    manual_command_slew_limit_dps: float = 0.0
+    auto_command_slew_limit_dps: float = 0.0
+    # Keyboard/manual-mode requested motion. Fine = ZQSD, coarse = arrow keys.
+    manual_fine_speed_dps: float = 120.0
+    manual_coarse_speed_dps: float = 300.0
+    manual_accel_time_s: float = 0.05
     # Low-pass filter on the error-derivative term (0 = heavy smoothing,
     # 1 = raw finite difference). Derivative is taken on the angular
     # error, NOT Kalman velocity, because Kalman velocity is polluted by
@@ -274,6 +305,119 @@ class ServoControlConfig:
     velocity_smoother_alpha: float = 0.4
     velocity_smoother_deadband_dps: float = 5.0
     velocity_smoother_slew_dps_per_s: float = 0.0
+    # Same-track losses shorter than this are treated as detector flicker,
+    # not a fresh target acquisition. The controller ramps correction back in.
+    micro_relock_min_loss_s: float = 0.025
+    micro_relock_window_s: float = 0.12
+    micro_relock_gain: float = 0.35
+    micro_relock_ramp_frames: int = 4
+    # Optional short pulse on direction reversal to take up servo/gear slack.
+    backlash_compensation_enabled: bool = False
+    backlash_pan_deg: float = 0.0
+    backlash_tilt_deg: float = 0.0
+    backlash_min_step_deg: float = 0.08
+    backlash_pulse_decay_dps: float = 3.0
+
+
+@dataclass(frozen=True)
+class PhoneCameraConfig:
+    """Host-side TaffCam transport and startup camera controls."""
+
+    bind_host: str = "127.0.0.1"
+    frame_port: int = 27183
+    control_port: int = 27184
+    adb_reverse_enabled: bool = True
+    allow_remote_clients: bool = False
+    adb_path: str = "adb"
+    adb_serial: str | None = None
+    adb_reverse_timeout_s: float = 4.0
+    start_app_on_open: bool = True
+    force_stop_app_on_open: bool = True
+    app_start_delay_s: float = 1.0
+    width: int = 640
+    height: int = 480
+    fps: int = 60
+    stream_format: PhoneStreamFormat = "mpeg"
+    pixel_format: PhonePixelFormat = "i420"
+    codec: PhoneVideoCodec = "h264"
+    bitrate_bps: int = 8_000_000
+    keyframe_interval_s: float = 1.0
+    decode_backend: PhoneDecodeBackend = "pyav"
+    capture_mode: PhoneCaptureMode = "auto"
+    connect_timeout_s: float = 5.0
+    read_timeout_s: float = 0.08
+    control_timeout_s: float = 2.0
+    camera_id: str | None = None
+    focus_diopters: float | None = None
+    exposure_ns: int | None = None
+    iso: int | None = None
+    awb_enabled: bool = False
+    awb_lock: bool = True
+    white_balance_kelvin: int | None = None
+    torch_enabled: bool = False
+    zoom_ratio: float | None = None
+
+
+@dataclass(frozen=True)
+class PhoneImuConfig:
+    """Host-side TaffCam motion-sensor transport and startup controls."""
+
+    enabled: bool = False
+    bind_host: str = "127.0.0.1"
+    sensor_port: int = 27185
+    requested_rate_hz: int = 200
+    adb_reverse_enabled: bool = True
+    allow_remote_clients: bool = False
+    adb_path: str = "adb"
+    adb_serial: str | None = None
+    adb_reverse_timeout_s: float = 4.0
+    start_service_on_open: bool = True
+    force_stop_app_on_open: bool = False
+    read_timeout_s: float = 0.03
+    app_start_delay_s: float = 0.0
+
+
+@dataclass(frozen=True)
+class DroidCamConfig:
+    """DroidCam Classic direct stream and remote-control integration."""
+
+    host: str = "127.0.0.1"
+    port: int = 4747
+    width: int = 640
+    height: int = 480
+    fps: int = 60
+    video_format: DroidCamVideoFormat = "jpg"
+    connect_timeout_s: float = 2.0
+    read_timeout_s: float = 0.03
+    remote_enabled: bool = False
+    remote_timeout_s: float = 0.25
+    active_camera: int | None = None
+    autofocus_once: bool = False
+    autofocus_mode: int | None = None
+    manual_focus: float | None = None
+    exposure_lock: bool | None = True
+    ev: float | None = None
+    wb_mode: int | None = None
+    wb_lock: bool | None = True
+    wb_level: int | None = None
+    torch_enabled: bool | None = None
+    zoom: float | None = None
+
+
+@dataclass(frozen=True)
+class SearchConfig:
+    """Intelligent target-lost sweep used by the output controller."""
+
+    enabled: bool = False
+    start_after_s: float = 0.25
+    timeout_s: float = 6.0
+    initial_radius_deg: float = 2.0
+    max_radius_deg: float = 24.0
+    expansion_rate_dps: float = 6.0
+    scan_speed_dps: float = 18.0
+    tilt_amplitude_ratio: float = 0.35
+    prediction_horizon_s: float = 0.60
+    return_home: bool = True
 
 
 @dataclass(frozen=True)
@@ -283,6 +427,7 @@ class RuntimeFlags:
     profile: bool = False
     log_file: Path | None = None
     log_level: LogLevel = "INFO"
+    ring_buffer_slots: int = 8
     # When true, prefer the GPU letterbox path
     # (:func:`src.inference.gpu_preprocess.gpu_letterbox`) over the inline
     # CPU resize+pad in the capture process. Off by default until a
@@ -309,6 +454,10 @@ class PipelineConfig:
     preflight: PreflightConfig = field(default_factory=PreflightConfig)
     relay: RelayConfig = field(default_factory=RelayConfig)
     servo_control: ServoControlConfig = field(default_factory=ServoControlConfig)
+    phone_camera: PhoneCameraConfig = field(default_factory=PhoneCameraConfig)
+    phone_imu: PhoneImuConfig = field(default_factory=PhoneImuConfig)
+    droidcam: DroidCamConfig = field(default_factory=DroidCamConfig)
+    search: SearchConfig = field(default_factory=SearchConfig)
 
 
 def default_tracking_config(target: TargetKind) -> TrackingConfig:

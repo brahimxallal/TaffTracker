@@ -22,6 +22,7 @@ from multiprocessing.sharedctypes import Synchronized
 from typing import Protocol
 
 from src.config import GimbalConfig, ServoControlConfig
+from src.output.command_smoother import CommandSlewLimiter
 from src.output.manual_control import (
     ManualVelocityTracker,
     boost_manual_velocity,
@@ -49,6 +50,7 @@ class ManualLoopConfig:
     pan_limit_deg: float
     tilt_limit_deg: float
     velocity_floor_dps: float
+    command_slew_limit_dps: float
 
     @classmethod
     def from_configs(
@@ -64,6 +66,7 @@ class ManualLoopConfig:
             pan_limit_deg=gimbal_config.pan_limit_deg,
             tilt_limit_deg=gimbal_config.tilt_limit_deg,
             velocity_floor_dps=servo_control_config.manual_response_velocity_floor_dps,
+            command_slew_limit_dps=servo_control_config.manual_command_slew_limit_dps,
         )
 
 
@@ -78,6 +81,8 @@ def run_manual_tick_loop(
     laser_enabled: Synchronized | None,
     loop_config: ManualLoopConfig,
     get_next_sequence: Callable[[], int],
+    monotonic: Callable[[], float] = time.monotonic,
+    sleep: Callable[[float], None] = time.sleep,
 ) -> None:
     """Run until ``shutdown_event`` is set.
 
@@ -86,13 +91,19 @@ def run_manual_tick_loop(
     manual mode doesn't emit a stale jump.
     """
     velocity_tracker = ManualVelocityTracker()
+    command_limiter = CommandSlewLimiter()
     tick_s = loop_config.tick_s
+    next_tick_s = monotonic()
+    last_command_time_s: float | None = None
 
     while not shutdown_event.is_set():
         is_manual = manual_mode is not None and bool(manual_mode.value)
         if not is_manual or sender is None:
             velocity_tracker.reset()
-            time.sleep(tick_s)
+            command_limiter.reset()
+            last_command_time_s = None
+            next_tick_s = monotonic() + tick_s
+            sleep(tick_s)
             continue
 
         manual_pan_deg = float(manual_pan.value) if manual_pan is not None else 0.0
@@ -106,6 +117,19 @@ def run_manual_tick_loop(
 
         pan_deg = manual_pan_deg * loop_config.pan_sign
         tilt_deg = manual_tilt_deg * loop_config.tilt_sign
+        now_s = monotonic()
+        dt_s = (
+            tick_s
+            if last_command_time_s is None
+            else min(max(now_s - last_command_time_s, 0.0), 0.1)
+        )
+        last_command_time_s = now_s
+        pan_deg, tilt_deg = command_limiter.limit(
+            pan_deg,
+            tilt_deg,
+            dt_s=dt_s,
+            limit_dps=loop_config.command_slew_limit_dps,
+        )
         now_ns = time.perf_counter_ns()
 
         pan_vel_dps, tilt_vel_dps = velocity_tracker.compute_velocity_dps(pan_deg, tilt_deg, now_ns)
@@ -130,4 +154,8 @@ def run_manual_tick_loop(
         if sender.is_connected:
             sender.send(packet)
 
-        time.sleep(tick_s)
+        next_tick_s += tick_s
+        now_s = monotonic()
+        if next_tick_s <= now_s:
+            next_tick_s = now_s + tick_s
+        sleep(max(0.0, next_tick_s - now_s))

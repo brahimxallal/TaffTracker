@@ -79,7 +79,7 @@ static void coast_decelerate(float dt_since)
 {
     /* Coast: maintain last velocity vector but decelerate towards zero */
     float decay = fmaxf(0.0f, 1.0f - (dt_since - WDT_COAST_S) / (WDT_HOLD_S - WDT_COAST_S));
-    
+
     // s_smoothed = s_current + s_prev_dp * decay
     float decay_step[2];
     dsps_mulc_f32(s_prev_dp, decay_step, 2, decay, 1, 1);
@@ -160,11 +160,15 @@ static void control_loop_cb(void *arg)
             gpio_set_level(PIN_LAMP, 1);  /* active-low: HIGH = OFF */
         }
     }
-    /* Relay control via protocol bit 7 */
-    gpio_set_level(PIN_RELAY, (cmd.state & FLAG_RELAY_ON) ? 0 : 1);  /* active-low */
-
     int64_t now_us = esp_timer_get_time();
     float dt_since = (now_us - cmd.received_at_us) / 1e6f;
+
+    /* Relay control via protocol bit 7.
+     * Fail-safe: only honour the bit while the command is fresh. If the host goes silent
+     * (PC crash, cable pulled, WiFi drop) mid-pulse, release the relay after WDT_HOLD_S
+     * instead of latching it on until the next packet arrives. */
+    bool relay_on = (cmd.state & FLAG_RELAY_ON) != 0 && dt_since <= WDT_HOLD_S;
+    gpio_set_level(PIN_RELAY, relay_on ? 0 : 1);  /* active-low */
 
     /* ── Watchdog ── */
     if (dt_since > WDT_HOME_S) {
@@ -238,7 +242,7 @@ static void control_loop_cb(void *arg)
     float speed = sqrtf(cmd.pan_vel_dps * cmd.pan_vel_dps +
                         cmd.tilt_vel_dps * cmd.tilt_vel_dps);
     float alpha = compute_adaptive_alpha(speed, cmd.state, cmd.quality);
-    
+
     float target_scaled[2];
     float smoothed_scaled[2];
     // target * alpha

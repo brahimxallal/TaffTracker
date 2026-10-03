@@ -64,6 +64,7 @@ def test_format_summary_minimal_includes_fps_and_inference() -> None:
 def test_format_summary_includes_all_stage_segments_when_available() -> None:
     profiler = _make_profiler_with_samples(
         wait=(2_000_000,),
+        capture_age=(3_000_000,),
         inference=(8_000_000,),
         postprocess=(1_500_000,),
         total_latency=(12_000_000,),
@@ -72,6 +73,7 @@ def test_format_summary_includes_all_stage_segments_when_available() -> None:
     line = format_profiler_summary(profiler, pipeline, fps=60.0, publish_drop_count=0)
     assert line is not None
     assert "wait p50/p95/p99 2.0/2.0/2.0 ms" in line
+    assert "age p50/p95/p99 3.0/3.0/3.0 ms" in line
     assert "inf p50/p95/p99 8.0/8.0/8.0 ms" in line
     assert "post p50/p95/p99 1.5/1.5/1.5 ms" in line
     assert "total p50/p95/p99 12.0/12.0/12.0 ms" in line

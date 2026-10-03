@@ -4,10 +4,20 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moves to Ubuntu 26.04 on 2026-10-19. Bump it deliberately.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
 
@@ -15,15 +25,16 @@ jobs:
         with:
           python-version: '3.12'
           cache: pip
+          cache-dependency-path: requirements-lint.txt
 
       - name: Install tooling
-        run: pip install ruff==0.15.9 black==26.3.1 mypy==1.20.0
+        run: pip install -r requirements-lint.txt
 
       - name: Ruff
-        run: ruff check src tests
+        run: ruff check .
 
       - name: Black (check only)
-        run: black --check src tests
+        run: black --check .
 
       - name: Mypy
         run: mypy src

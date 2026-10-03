@@ -1,0 +1,10 @@
+# ============================================================
+#  Vision Gimbal Tracker — Pinned Lint Toolchain
+# ============================================================
+# Used by CI (.github/workflows/lint.yml) and pulled in by requirements-dev.txt,
+# so a local `ruff` / `black` gives the same verdict as CI.
+# Keep the hook revs in .pre-commit-config.yaml on the same versions.
+
+ruff==0.15.9
+black==26.3.1
+mypy==1.20.0

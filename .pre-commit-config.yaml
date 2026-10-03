@@ -1,3 +1,5 @@
+# Local hooks mirror the CI lint job (.github/workflows/lint.yml): the ruff, black
+# and mypy revs below match requirements-lint.txt. Enable with `pre-commit install`.
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
@@ -11,18 +13,30 @@ repos:
       - id: detect-private-key
       - id: mixed-line-ending
         args: ['--fix=lf']
+        # launch.bat and *.ps1 are CRLF in the working tree on purpose (.gitattributes
+        # eol=crlf). Forcing LF here would rewrite them and break them on Windows.
+        exclude: \.(bat|ps1)$
 
   - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.15.0
+    rev: v0.15.9
     hooks:
-      - id: ruff
+      - id: ruff-check
         args: [--fix]
-      - id: ruff-format
+
+  # black, not ruff-format: CI runs `black --check`, and the two formatters disagree
+  # on a number of files in this repository.
+  - repo: https://github.com/psf/black-pre-commit-mirror
+    rev: 26.3.1
+    hooks:
+      - id: black
 
   - repo: https://github.com/pre-commit/mirrors-mypy
     rev: v1.20.0
     hooks:
       - id: mypy
+        # Manual, like the non-blocking CI step: strict mode still reports findings.
+        # Run it with: pre-commit run --hook-stage manual mypy --all-files
+        stages: [manual]
         additional_dependencies:
           - numpy>=2.0
           - types-PyYAML

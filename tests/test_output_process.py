@@ -2,12 +2,21 @@ from __future__ import annotations
 
 import logging
 import multiprocessing as mp
-from math import degrees
+import threading
+from math import degrees, radians
 from unittest.mock import MagicMock
 
 import pytest
 
-from src.config import CameraConfig, CommConfig, GimbalConfig, RuntimeFlags, TrackingConfig
+from src.config import (
+    CameraConfig,
+    CommConfig,
+    GimbalConfig,
+    RuntimeFlags,
+    SearchConfig,
+    ServoControlConfig,
+    TrackingConfig,
+)
 from src.output.auto_comm import AutoCommTransport
 from src.output.diagnostics import get_transport_status as _get_transport_status
 from src.output.process import OutputProcess
@@ -19,6 +28,7 @@ from src.shared.protocol import (
     decode_packet_v2,
 )
 from src.shared.ring_buffer import SharedRingBuffer
+from src.shared.runtime_control import OutputRuntimeTuning
 from src.shared.types import TrackingMessage
 
 
@@ -56,6 +66,163 @@ def _make_proc(width: int = 640, height: int = 480, hold_time_s: float = 0.5) ->
         tracking_config=TrackingConfig(hold_time_s=hold_time_s),
         gimbal_config=GimbalConfig(kp=1.0, ki=0.0, kd=0.0),
     )
+
+
+def _make_slewed_auto_proc(
+    *,
+    limit_dps: float = 30.0,
+    laser_boresight_pan: object | None = None,
+    laser_boresight_tilt: object | None = None,
+) -> OutputProcess:
+    return OutputProcess(
+        layout=None,  # type: ignore[arg-type]
+        write_index=None,  # type: ignore[arg-type]
+        result_queue=None,  # type: ignore[arg-type]
+        shutdown_event=None,  # type: ignore[arg-type]
+        error_queue=None,  # type: ignore[arg-type]
+        mode="camera",
+        camera_config=CameraConfig(width=640, height=480, fps=10),
+        comm_config=CommConfig(channel="serial", serial_port="COM3"),
+        tracking_config=TrackingConfig(),
+        gimbal_config=GimbalConfig(
+            kp=100.0,
+            ki=0.0,
+            kd=0.0,
+            deadband_deg=0.0,
+            slew_limit_dps=1000.0,
+        ),
+        servo_control_config=ServoControlConfig(auto_command_slew_limit_dps=limit_dps),
+        laser_boresight_pan=laser_boresight_pan,  # type: ignore[arg-type]
+        laser_boresight_tilt=laser_boresight_tilt,  # type: ignore[arg-type]
+    )
+
+
+@pytest.mark.unit
+def test_output_process_requests_windows_timer_resolution(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, int]] = []
+
+    class _FakeTimerResolution:
+        def __init__(self, period_ms: int) -> None:
+            self.period_ms = period_ms
+
+        def __enter__(self):
+            calls.append(("enter", self.period_ms))
+            return self
+
+        def __exit__(self, exc_type, exc, traceback) -> None:
+            calls.append(("exit", self.period_ms))
+
+    monkeypatch.setattr("src.output.process.WindowsTimerResolution", _FakeTimerResolution)
+    ring_buffer, write_index = SharedRingBuffer.create((4, 4, 3), num_slots=3)
+    result_queue: mp.Queue = mp.Queue()
+    shutdown_event = mp.Event()
+    shutdown_event.set()
+
+    proc = OutputProcess(
+        layout=ring_buffer.layout,
+        write_index=write_index,
+        result_queue=result_queue,
+        shutdown_event=shutdown_event,
+        error_queue=mp.Queue(),
+        mode="camera",
+        camera_config=CameraConfig(width=4, height=4, fps=60),
+        comm_config=CommConfig(enabled=False),
+        tracking_config=TrackingConfig(),
+        flags=RuntimeFlags(headless=True, profile=False),
+    )
+
+    try:
+        proc.run()
+    finally:
+        ring_buffer.cleanup()
+
+    assert calls.count(("enter", 1)) == 2
+    assert calls.count(("exit", 1)) == 2
+
+
+@pytest.mark.unit
+def test_output_process_stops_manual_thread_on_sentinel(monkeypatch: pytest.MonkeyPatch) -> None:
+    manual_finished = threading.Event()
+    manual_shutdown_states: list[bool] = []
+
+    def fake_run_manual_tick_loop(**kwargs) -> None:
+        shutdown_event = kwargs["shutdown_event"]
+        shutdown_event.wait(0.5)
+        manual_shutdown_states.append(shutdown_event.is_set())
+        manual_finished.set()
+
+    monkeypatch.setattr("src.output.process.run_manual_tick_loop", fake_run_manual_tick_loop)
+    ring_buffer, write_index = SharedRingBuffer.create((4, 4, 3), num_slots=3)
+    result_queue: mp.Queue = mp.Queue()
+    shutdown_event = mp.Event()
+    result_queue.put(None)
+
+    proc = OutputProcess(
+        layout=ring_buffer.layout,
+        write_index=write_index,
+        result_queue=result_queue,
+        shutdown_event=shutdown_event,
+        error_queue=mp.Queue(),
+        mode="camera",
+        camera_config=CameraConfig(width=4, height=4, fps=60),
+        comm_config=CommConfig(enabled=False),
+        tracking_config=TrackingConfig(),
+        flags=RuntimeFlags(headless=True, profile=False),
+    )
+
+    try:
+        proc.run()
+        assert manual_finished.wait(timeout=1.0)
+    finally:
+        ring_buffer.cleanup()
+
+    assert shutdown_event.is_set()
+    assert manual_shutdown_states == [True]
+
+
+@pytest.mark.unit
+def test_output_process_ends_timer_when_cleanup_raises(monkeypatch: pytest.MonkeyPatch) -> None:
+    calls: list[tuple[str, int]] = []
+
+    class _FakeTimerResolution:
+        def __init__(self, period_ms: int) -> None:
+            self.period_ms = period_ms
+
+        def __enter__(self):
+            calls.append(("enter", self.period_ms))
+            return self
+
+        def __exit__(self, exc_type, exc, traceback) -> None:
+            calls.append(("exit", self.period_ms))
+
+    monkeypatch.setattr("src.output.process.WindowsTimerResolution", _FakeTimerResolution)
+    monkeypatch.setattr("src.output.process.run_manual_tick_loop", lambda **kwargs: None)
+    ring_buffer, write_index = SharedRingBuffer.create((4, 4, 3), num_slots=3)
+    result_queue: mp.Queue = mp.Queue()
+    result_queue.put(None)
+
+    proc = OutputProcess(
+        layout=ring_buffer.layout,
+        write_index=write_index,
+        result_queue=result_queue,
+        shutdown_event=mp.Event(),
+        error_queue=mp.Queue(),
+        mode="camera",
+        camera_config=CameraConfig(width=4, height=4, fps=60),
+        comm_config=CommConfig(enabled=False),
+        tracking_config=TrackingConfig(),
+        flags=RuntimeFlags(headless=True, profile=False),
+    )
+    monkeypatch.setattr(proc, "_write_metrics_summary", MagicMock(side_effect=RuntimeError("boom")))
+
+    try:
+        with pytest.raises(RuntimeError, match="boom"):
+            proc.run()
+    finally:
+        ring_buffer.cleanup()
+
+    assert calls.count(("enter", 1)) == 2
+    assert calls.count(("exit", 1)) == 2
 
 
 @pytest.mark.unit
@@ -111,6 +278,36 @@ def test_apply_fail_safe_centers_after_hold_expired() -> None:
 
     assert result.filtered_angles == (0.0, 0.0)
     assert result.state_source == "center"
+
+
+def test_apply_fail_safe_allows_search_to_continue_after_hold_expired() -> None:
+    proc = OutputProcess(
+        layout=None,  # type: ignore[arg-type]
+        write_index=None,  # type: ignore[arg-type]
+        result_queue=None,  # type: ignore[arg-type]
+        shutdown_event=None,  # type: ignore[arg-type]
+        error_queue=None,  # type: ignore[arg-type]
+        mode="camera",
+        camera_config=CameraConfig(width=640, height=480, fps=30),
+        comm_config=CommConfig(channel="serial", serial_port="COM3"),
+        tracking_config=TrackingConfig(hold_time_s=0.1),
+        gimbal_config=GimbalConfig(kp=1.0, ki=0.0, kd=0.0),
+        search_config=SearchConfig(enabled=True, timeout_s=6.0),
+    )
+    last_valid = _make_message(timestamp_ns=0, target_acquired=True)
+    searching = _make_message(
+        timestamp_ns=500_000_000,
+        target_acquired=False,
+        state_source="prediction",
+        confidence=0.0,
+        filtered_angles=(0.05, -0.02),
+        servo_angles=(0.05, -0.02),
+    )
+
+    result = proc._apply_fail_safe(searching, last_valid)  # noqa: SLF001
+
+    assert result.state_source == "prediction"
+    assert result.target_acquired is False
 
 
 @pytest.mark.unit
@@ -188,21 +385,87 @@ def test_encode_packet_clamps_confidence() -> None:
 
 
 @pytest.mark.unit
-def test_encode_packet_encodes_velocity() -> None:
+def test_encode_packet_encodes_output_command_velocity() -> None:
     proc = _make_proc()
-    pan_vel_rad = 0.15  # rad/s
-    tilt_vel_rad = -0.25
-    msg = _make_message(
-        filtered_angles=(0.0, 0.0),
-        angular_velocity=(pan_vel_rad, tilt_vel_rad),
+    seed = _make_message(
+        servo_angles=(0.0, 0.0),
+        timestamp_ns=1_000_000_000,
+        fps=10.0,
     )
+    first = decode_packet_v2(proc._encode_packet(seed, sequence=0))
+    assert first is not None
+    assert first.pan_vel == 0
+    assert first.tilt_vel == 0
 
-    packet = proc._encode_packet(msg, sequence=0)
+    msg = _make_message(
+        servo_angles=(radians(10.0), radians(-5.0)),
+        angular_velocity=(radians(300.0), radians(-300.0)),
+        timestamp_ns=1_100_000_000,
+        fps=10.0,
+    )
+    packet = proc._encode_packet(msg, sequence=1)
     decoded = decode_packet_v2(packet)
 
     assert decoded is not None
-    assert decoded.pan_vel == int(round(degrees(pan_vel_rad) * 100.0))
-    assert decoded.tilt_vel == int(round(degrees(tilt_vel_rad) * 100.0))
+    assert decoded.pan_vel == 1000
+    assert decoded.tilt_vel == -225
+
+
+@pytest.mark.unit
+def test_auto_packet_velocity_uses_final_slewed_command_delta() -> None:
+    proc = _make_slewed_auto_proc(limit_dps=30.0)
+    seed = _make_message(
+        servo_angles=(0.0, 0.0),
+        servo_angular_velocity=(0.0, 0.0),
+        timestamp_ns=1_000_000_000,
+        fps=10.0,
+    )
+    first = decode_packet_v2(proc._encode_packet(seed, sequence=0))
+    assert first is not None
+    assert first.pan_vel == 0
+
+    fast_target = _make_message(
+        servo_angles=(radians(45.0), 0.0),
+        servo_angular_velocity=(radians(500.0), 0.0),
+        timestamp_ns=1_100_000_000,
+        fps=10.0,
+    )
+    decoded = decode_packet_v2(proc._encode_packet(fast_target, sequence=1))
+
+    assert decoded is not None
+    assert decoded.pan == 300
+    assert decoded.pan_vel == 3000
+    assert not (decoded.state & FLAG_FAST_MOTION)
+
+
+@pytest.mark.unit
+def test_auto_boresight_change_is_limited_before_packet_velocity() -> None:
+    boresight_pan = mp.Value("d", 0.0)
+    boresight_tilt = mp.Value("d", 0.0)
+    proc = _make_slewed_auto_proc(
+        limit_dps=30.0,
+        laser_boresight_pan=boresight_pan,
+        laser_boresight_tilt=boresight_tilt,
+    )
+    seed = _make_message(
+        servo_angles=(0.0, 0.0),
+        timestamp_ns=1_000_000_000,
+        fps=10.0,
+    )
+    proc._encode_packet(seed, sequence=0)
+
+    boresight_pan.value = 10.0
+    shifted = _make_message(
+        servo_angles=(0.0, 0.0),
+        timestamp_ns=1_100_000_000,
+        fps=10.0,
+    )
+    decoded = decode_packet_v2(proc._encode_packet(shifted, sequence=1))
+
+    assert decoded is not None
+    assert decoded.pan == 300
+    assert decoded.pan_vel == 3000
+    assert not (decoded.state & FLAG_FAST_MOTION)
 
 
 @pytest.mark.unit
@@ -403,6 +666,35 @@ def test_encode_packet_manual_motion_sets_fast_response_flag() -> None:
     assert not (first_decoded.state & FLAG_FAST_MOTION)
     assert second_decoded.pan_vel == 8000  # boosted to 80°/s floor × 100
     assert second_decoded.state & FLAG_FAST_MOTION
+
+
+@pytest.mark.unit
+def test_output_runtime_tuning_updates_controller_config() -> None:
+    proc = _make_proc()
+    ack = mp.Value("i", 0)
+    proc._control_ack_version = ack  # noqa: SLF001
+
+    proc._apply_runtime_tuning(  # noqa: SLF001
+        OutputRuntimeTuning(
+            version=4,
+            hold_time_s=0.9,
+            gimbal_kp=1.6,
+            gimbal_ki=0.1,
+            gimbal_kd=0.8,
+            gimbal_deadband_deg=0.7,
+            gimbal_slew_limit_dps=55.0,
+            gimbal_kp_near=0.9,
+            gimbal_kp_far=1.8,
+            gimbal_predictive_lead_s=0.03,
+        )
+    )
+
+    assert proc._tracking_config.hold_time_s == pytest.approx(0.9)  # noqa: SLF001
+    assert proc._gimbal_config.kp == pytest.approx(1.6)  # noqa: SLF001
+    assert proc._auto_controller_config.effective_kp_near == pytest.approx(0.9)  # noqa: SLF001
+    assert proc._auto_controller_config.effective_kp_far == pytest.approx(1.8)  # noqa: SLF001
+    assert proc._auto_controller_config.slew_limit_dps == pytest.approx(55.0)  # noqa: SLF001
+    assert ack.value == 4
 
 
 # --- _center_message servo field tests ---

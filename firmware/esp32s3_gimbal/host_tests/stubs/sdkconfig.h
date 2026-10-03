@@ -1,0 +1,2 @@
+#pragma once
+#define CONFIG_ESP_TIMER_TASK_AFFINITY_CPU1 1

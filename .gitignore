@@ -12,64 +12,72 @@ dist/
 build/
 *.whl
 
-# --- Virtual environment ---
+# --- Virtual environments ---
 .venv/
 venv/
 env/
 
-# --- Testing & coverage ---
+# --- Test, coverage & tooling caches ---
 .coverage
 .coverage.*
+coverage.xml
 htmlcov/
 .pytest_cache/
+.ruff_cache/
+.mypy_cache/
 
-# --- IDE ---
+# --- Editors & OS ---
 .idea/
-.claude/
 *.swp
 *.swo
 *~
-
-# --- OS ---
 Thumbs.db
 Desktop.ini
 .DS_Store
 
-# --- TensorRT engines (large, machine-specific) ---
-engines/*.engine
-engines/*.onnx
+# --- AI-assistant & local tooling state (never commit) ---
+.claude/
+.codex_tools/
+.gsd/
+plans/
+docs/superpowers/
+/.codex_runtime_screen*.png
 
-# --- Models (large, tracked via LFS or downloaded) ---
-models/*.pt
-models/**/*.pt
+# --- Local scratch space (may hold third-party or decompiled material) ---
+standalone_experiments/
+
+# --- Secrets (never commit) ---
+.env
+.env.*
+!.env.example
+firmware/**/*.env
+!firmware/**/*.env.example
+*.jks
+*.keystore
+
+# --- Large, machine-specific ML artifacts ---
+# Weights are also dropped in the working directory by the ultralytics auto-download,
+# so these are ignored repo-wide, not only under models/ and engines/.
+*.pt
+*.engine
+*.onnx
 models/*.cache
 models/**/*.cache
 
-# --- Calibration data (generated per-camera) ---
+# --- Calibration data (generated per camera) ---
 calibration_data/*.npz
 calibration_data/int8_calib.yaml
 calibration_data/int8_calib/
 calibration_data/servo_limits.json
+calibration_data/*.png
+checkerboard_*.png
 
-# --- Videos (large test assets) ---
+# --- Videos & logs (large, run-specific) ---
 videos/**
 !videos/.gitkeep
-videos/*.mp4
-videos/*.avi
-
-# --- Firmware secrets ---
-firmware/**/wifi_secrets.env
-videos/*.mov
-videos/*.mkv
-videos/*.webm
-videos/*.m4v
-
-# --- Logs ---
 logs/**
 !logs/.gitkeep
-logs/*.csv
-logs/*.log
-logs/recordings/
+*.log
 
 # --- Firmware build output ---
 firmware/esp32s3_gimbal/.pio/
@@ -78,24 +86,15 @@ firmware/esp32s3_gimbal/sdkconfig
 firmware/esp32s3_gimbal/managed_components/
 firmware/esp32s3_gimbal/compile_commands.json
 
-# --- Secrets ---
-.env
-.env.*
-!.env.example
-firmware/**/*.env
-!firmware/**/*.env.example
+# --- Android local/build state ---
+android/**/.gradle/
+android/**/.kotlin/
+android/**/build/
+android/**/*.apk
+android/**/*.aab
+local.properties
 
-# --- Tooling caches ---
-.ruff_cache/
-.mypy_cache/
-
-# --- Large/ephemeral artifacts ---
-backup_pre_refactor_*.tar
-calibration_data/*.png
-plans/
-
-# --- Misc ---
+# --- Backups & temporary files ---
 *.bak
 *.tmp
 *.tar
-checkerboard_*.png

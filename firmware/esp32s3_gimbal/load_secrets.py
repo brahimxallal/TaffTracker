@@ -3,6 +3,7 @@
 PlatformIO resolves ${sysenv.*} before pre-scripts run, so os.environ.setdefault
 is too late.  Instead, parse the .env file and append -D flags via the SCons env.
 """
+
 import os
 from pathlib import Path
 
@@ -26,6 +27,16 @@ if env_file.exists():
 ssid = secrets.get("TAFFF_WIFI_SSID", os.environ.get("TAFFF_WIFI_SSID", ""))
 pw = secrets.get("TAFFF_WIFI_PASS", os.environ.get("TAFFF_WIFI_PASS", ""))
 if ssid:
-    env.Append(CPPDEFINES=[('CONFIG_TAFFF_WIFI_SSID', '\\"' + ssid + '\\"')])  # noqa: F821
+    env.Append(CPPDEFINES=[("CONFIG_TAFFF_WIFI_SSID", '\\"' + ssid + '\\"')])  # noqa: F821
 if pw:
-    env.Append(CPPDEFINES=[('CONFIG_TAFFF_WIFI_PASS', '\\"' + pw + '\\"')])  # noqa: F821
+    env.Append(CPPDEFINES=[("CONFIG_TAFFF_WIFI_PASS", '\\"' + pw + '\\"')])  # noqa: F821
+
+for env_key, define_name in (
+    ("TAFFF_WIFI_STATIC_IP", "CONFIG_TAFFF_WIFI_STATIC_IP"),
+    ("TAFFF_WIFI_GATEWAY", "CONFIG_TAFFF_WIFI_GATEWAY"),
+    ("TAFFF_WIFI_NETMASK", "CONFIG_TAFFF_WIFI_NETMASK"),
+    ("TAFFF_WIFI_DNS", "CONFIG_TAFFF_WIFI_DNS"),
+):
+    value = secrets.get(env_key, os.environ.get(env_key, ""))
+    if value:
+        env.Append(CPPDEFINES=[(define_name, '\\"' + value + '\\"')])  # noqa: F821

@@ -50,6 +50,8 @@ class TrackingPipeline:
         self._servo_ema_pixel = servo_ema_pixel
         self._measurement_update_count = 0
         self._measurement_gated_count = 0
+        self._accepted_lock_track_id: int | None = None
+        self._low_confidence_frames = 0
 
     @property
     def measurement_update_count(self) -> int:
@@ -83,7 +85,7 @@ class TrackingPipeline:
             tracks, record.frame, record.timestamp_ns, prev_locked_id
         )
 
-        current_locked = primary_track.track_id if primary_track is not None else None
+        current_locked = primary_track.track_id if primary_track is not None else ts.locked_track_id
         proximity_transfer = ts.consume_proximity_transfer()
 
         # Handle lock transitions
@@ -186,6 +188,7 @@ class TrackingPipeline:
         self.adaptive.update(detected, speed)
         ts.tracker.set_track_threshold(self.adaptive.confidence_threshold)
         message = replace(message, hold_time_s=self.adaptive.hold_time_s)
+        current_locked = ts.locked_track_id
 
         if message.state_source == "measurement":
             self._measurement_update_count += 1
@@ -200,6 +203,94 @@ class TrackingPipeline:
             self.adaptive.notify_camera_motion(cam_speed)
 
         return message, next_was_lost, current_locked, prev_locked_bbox
+
+    def process_prediction_frame(
+        self,
+        *,
+        record,
+        frame: np.ndarray,
+        prev_locked_id: int | None,
+        was_lost: bool,
+        dt: float,
+        fps: float,
+        wait_ms: float,
+        prediction_confidence: float,
+    ) -> tuple[TrackingMessage, bool, int | None, tuple[float, ...] | None]:
+        """Run a planned Kalman-only frame between detector frames.
+
+        Planned prediction frames are different from detector misses: they are
+        intentionally skipped heavy-inference frames while the lock is healthy,
+        so they should continue driving the output controller.
+        """
+        message, _ = self._build_message(
+            primary_track=None,
+            all_tracks=(),
+            record=record,
+            frame=frame,
+            was_lost=was_lost,
+            dt=dt,
+            fps=fps,
+            wait_ms=wait_ms,
+            inference_ms=0.0,
+            postprocess_ms=0.0,
+        )
+        if message.state_source == "prediction" and message.filtered_angles is not None:
+            message = replace(
+                message,
+                target_acquired=True,
+                confidence=max(0.0, min(1.0, float(prediction_confidence))),
+            )
+            next_was_lost = was_lost
+        else:
+            next_was_lost = True
+        return message, next_was_lost, self.tracker_stage.locked_track_id, None
+
+    def _accept_measurement(self, primary_track) -> bool:
+        """Return true only when a visible track is trustworthy enough to steer."""
+        if primary_track is None or primary_track.lost_frames != 0:
+            return False
+
+        score = float(primary_track.score)
+        track_id = int(primary_track.track_id)
+        same_lock = self._accepted_lock_track_id == track_id
+        threshold = (
+            self._tracking_config.lock_keep_confidence
+            if same_lock
+            else self._tracking_config.lock_acquire_confidence
+        )
+        if score >= threshold:
+            self._accepted_lock_track_id = track_id
+            self._low_confidence_frames = 0
+            return True
+
+        self._low_confidence_frames += 1
+        if same_lock and (
+            self._low_confidence_frames > self._tracking_config.low_confidence_grace_frames
+        ):
+            self._accepted_lock_track_id = None
+        LOGGER.debug(
+            "Rejected low-confidence lock candidate: track=%s score=%.3f threshold=%.3f",
+            track_id,
+            score,
+            threshold,
+        )
+        return False
+
+    def _high_confidence_alternative(self, primary_track, all_tracks):
+        primary_id = primary_track.track_id if primary_track is not None else None
+        candidates = [
+            track
+            for track in all_tracks
+            if track.lost_frames == 0
+            and track.track_id != primary_id
+            and float(track.score) >= self._tracking_config.lock_acquire_confidence
+        ]
+        if not candidates:
+            return None
+        return max(
+            candidates,
+            key=lambda track: (float(track.score), int(track.age), -int(track.track_id)),
+        )
 
     def _build_message(
         self,
@@ -225,7 +316,20 @@ class TrackingPipeline:
         is_occlusion_recovery = False
         egomotion_applied_px: tuple[float, float] | None = None
 
-        if primary_track is not None and primary_track.lost_frames == 0:
+        measurement_accepted = self._accept_measurement(primary_track)
+        if not measurement_accepted:
+            alternative = self._high_confidence_alternative(primary_track, all_tracks)
+            if alternative is not None:
+                LOGGER.info(
+                    "Switching to high-confidence lock candidate: %s -> %s",
+                    primary_track.track_id if primary_track is not None else None,
+                    alternative.track_id,
+                )
+                ts.force_lock(alternative.track_id)
+                primary_track = alternative
+                measurement_accepted = self._accept_measurement(primary_track)
+
+        if measurement_accepted:
             detection = Detection(
                 bbox=primary_track.bbox,
                 score=primary_track.score,
@@ -242,10 +346,14 @@ class TrackingPipeline:
                 is_occlusion_recovery = True
                 kalman.oru_re_update()
 
-            compensation = cs.compensate_measurement_for_egomotion(
-                raw_pixel,
-                dt,
-                record.timestamp_ns,
+            compensation = (
+                cs.compensate_measurement_for_egomotion(
+                    raw_pixel,
+                    dt,
+                    record.timestamp_ns,
+                )
+                if self._tracking_config.egomotion_compensation_enabled
+                else None
             )
             measurement_pixel = raw_pixel
             if compensation is not None:
@@ -260,6 +368,7 @@ class TrackingPipeline:
                 filtered_velocity = (filtered_state.vx, filtered_state.vy)
             else:
                 filtered_velocity = (0.0, 0.0)
+            ts.update_locked_bbox(primary_track.bbox)
             ts.last_locked_velocity = filtered_velocity
             ts.last_locked_timestamp_ns = record.timestamp_ns
 
@@ -296,7 +405,7 @@ class TrackingPipeline:
             )
             servo_angles = filtered_angles
             state_source = "prediction" if predicted is not None else "lost"
-            track_id = primary_track.track_id if primary_track is not None else None
+            track_id = ts.locked_track_id
             confidence = 0.0
             target_acquired = False
             next_was_lost = True

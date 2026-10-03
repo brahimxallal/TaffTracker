@@ -4,11 +4,18 @@ setlocal EnableExtensions EnableDelayedExpansion
 set "ROOT=%~dp0"
 cd /d "%ROOT%"
 
-:: --- Auto-detect Python: prefer venv, then PATH ---
-if defined VIRTUAL_ENV (
-    set "PYTHON=%VIRTUAL_ENV%\Scripts\python.exe"
-) else if exist "%ROOT%.venv\Scripts\python.exe" (
+:: --- Auto-detect Python: prefer project venv, then active venv, then PATH ---
+set "PROJECT_PYTHON=%ROOT%.venv\Scripts\python.exe"
+set "PYTHON_NOTE="
+if exist "%ROOT%.venv\Scripts\python.exe" (
     set "PYTHON=%ROOT%.venv\Scripts\python.exe"
+    if defined VIRTUAL_ENV (
+        if /I not "%VIRTUAL_ENV%\Scripts\python.exe"=="%PROJECT_PYTHON%" (
+            set "PYTHON_NOTE=  [INFO] Ignoring active VIRTUAL_ENV: %VIRTUAL_ENV%"
+        )
+    )
+) else if defined VIRTUAL_ENV (
+    set "PYTHON=%VIRTUAL_ENV%\Scripts\python.exe"
 ) else (
     where python >nul 2>&1
     if errorlevel 1 (
@@ -94,17 +101,10 @@ echo.
 echo  Quick Track: %QT_TARGET%
 echo  ----------------------------------------
 echo.
-if not exist "%QT_ENGINE%" (
-    echo  Engine missing: %QT_ENGINE%
-    echo  Exporting now ... this takes 2-5 minutes.
-    echo.
-    "%PYTHON%" "%ROOT%scripts\export_engines.py" --target %QT_TARGET%
-    if errorlevel 1 (
-        echo.
-        echo  [FAIL] Engine export failed.
-        pause
-        goto :menu
-    )
+call :prompt_engine_ready "%QT_TARGET%" "%QT_ENGINE%"
+if errorlevel 1 (
+    pause
+    goto :menu
 )
 echo  [OK] Engine ready
 echo  Mount:   on_gimbal
@@ -191,7 +191,6 @@ if defined EXTRA_ARGS echo    Flags:   %EXTRA_ARGS%
 echo    Hotkeys: ESC = quit, M = auto/manual, P = laser toggle, O = relay pulse, H = help
 echo  ========================================
 echo.
-set "CT_CMD="%PYTHON%" -m src.main --mode %MODE_ARG% --target %TARGET_ARG% --source "%SOURCE_ARG%" --config config.yaml %COMM_ARGS% %FOV_ARGS% %EXTRA_ARGS%"
 :ct_launch
 "%PYTHON%" -m src.main --mode %MODE_ARG% --target %TARGET_ARG% --source "%SOURCE_ARG%" --config config.yaml %COMM_ARGS% %FOV_ARGS% %EXTRA_ARGS%
 echo.
@@ -474,10 +473,11 @@ echo.
 echo  Checking environment...
 echo.
 if not exist "%PYTHON%" (
-    echo  [FAIL] Python venv not found: %PYTHON%
+    echo  [FAIL] Python not found: %PYTHON%
     exit /b 1
 )
-echo  [OK] Python venv
+echo  [OK] Python: %PYTHON%
+if defined PYTHON_NOTE echo %PYTHON_NOTE%
 "%PYTHON%" -c "import torch;assert torch.cuda.is_available();print('  [OK] CUDA:',torch.cuda.get_device_name(0))" 2>nul
 if errorlevel 1 (
     echo  [FAIL] CUDA not available.
@@ -514,22 +514,45 @@ if /I "%~1"=="human" (
 exit /b 0
 
 :prompt_engine_ready
-if exist "%~2" (
+if not exist "%~2" goto :prompt_engine_missing
+echo  Engine found: %~2
+call :verify_engine_compatible "%~2"
+if not errorlevel 1 (
     echo  [OK] Engine: %~2
     exit /b 0
 )
+echo.
+echo  [WARN] Existing engine is not compatible with the selected Python/TensorRT.
+echo         Python: %PYTHON%
+set "CE_YN="
+set /p "CE_YN=  Re-export now? [Y/n]: "
+if /I "%CE_YN%"=="n" exit /b 1
+goto :prompt_engine_export
+
+:prompt_engine_missing
 echo  Engine missing: %~2
 set "CE_YN="
 set /p "CE_YN=  Export now? [Y/n]: "
 if /I "%CE_YN%"=="n" exit /b 1
 echo.
+
+:prompt_engine_export
 "%PYTHON%" "%ROOT%scripts\export_engines.py" --target %~1
 if errorlevel 1 (
     echo  [FAIL] Export failed.
     exit /b 1
 )
+call :verify_engine_compatible "%~2"
+if errorlevel 1 (
+    echo  [FAIL] Export completed, but the engine still cannot be loaded by this Python/TensorRT.
+    exit /b 1
+)
 echo  [OK] Engine: %~2
 exit /b 0
+
+:verify_engine_compatible
+"%PYTHON%" -c "import sys; from src.inference.trt_engine import TRTEngine; engine = TRTEngine(sys.argv[1], use_cuda_graph=False); engine.close(); print('  [OK] Engine compatible')" "%~1"
+exit /b %ERRORLEVEL%
 
 :: -- Select Mode --
 :select_mode

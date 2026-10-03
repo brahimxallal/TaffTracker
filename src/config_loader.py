@@ -14,16 +14,20 @@ from src.calibration.laser_boresight import load_boresight
 from src.config import (
     CameraConfig,
     CommConfig,
+    DroidCamConfig,
     GimbalConfig,
     LaserBoresightConfig,
     LaserConfig,
     ModelConfig,
     Orientation,
+    PhoneCameraConfig,
+    PhoneImuConfig,
     PipelineConfig,
     PreflightConfig,
     RelayConfig,
     RuntimeFlags,
     RuntimePaths,
+    SearchConfig,
     ServoControlConfig,
     adapt_tracking_for_fps,
     default_tracking_config,
@@ -85,6 +89,12 @@ def _overlay_dataclass(base, yaml_dict: dict[str, Any]):
     return replace(base, **overrides) if overrides else base
 
 
+def _parse_bool(value: Any, field_name: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    raise ValueError(f"Invalid {field_name}={value!r}; expected true or false")
+
+
 _LITERAL_CONSTRAINTS: dict[str, tuple[str, ...]] = {
     "mode": get_args(get_type_hints(PipelineConfig)["mode"]),
     "target": get_args(get_type_hints(PipelineConfig)["target"]),
@@ -102,6 +112,49 @@ def _validate_config(config: PipelineConfig) -> None:
             f"Invalid camera.backend={config.camera.backend!r}; "
             f"expected one of {get_args(get_type_hints(CameraConfig)['backend'])}"
         )
+    if config.camera.source_backend not in get_args(get_type_hints(CameraConfig)["source_backend"]):
+        raise ValueError(
+            f"Invalid camera.source_backend={config.camera.source_backend!r}; "
+            f"expected one of {get_args(get_type_hints(CameraConfig)['source_backend'])}"
+        )
+    if config.phone_camera.pixel_format not in get_args(
+        get_type_hints(PhoneCameraConfig)["pixel_format"]
+    ):
+        raise ValueError(
+            f"Invalid phone_camera.pixel_format={config.phone_camera.pixel_format!r}; "
+            f"expected one of {get_args(get_type_hints(PhoneCameraConfig)['pixel_format'])}"
+        )
+    if config.phone_camera.stream_format not in get_args(
+        get_type_hints(PhoneCameraConfig)["stream_format"]
+    ):
+        raise ValueError(
+            f"Invalid phone_camera.stream_format={config.phone_camera.stream_format!r}; "
+            f"expected one of {get_args(get_type_hints(PhoneCameraConfig)['stream_format'])}"
+        )
+    if config.phone_camera.codec not in get_args(get_type_hints(PhoneCameraConfig)["codec"]):
+        raise ValueError(
+            f"Invalid phone_camera.codec={config.phone_camera.codec!r}; "
+            f"expected one of {get_args(get_type_hints(PhoneCameraConfig)['codec'])}"
+        )
+    if config.phone_camera.decode_backend not in get_args(
+        get_type_hints(PhoneCameraConfig)["decode_backend"]
+    ):
+        raise ValueError(
+            f"Invalid phone_camera.decode_backend={config.phone_camera.decode_backend!r}; "
+            f"expected one of {get_args(get_type_hints(PhoneCameraConfig)['decode_backend'])}"
+        )
+    if config.phone_camera.capture_mode not in get_args(
+        get_type_hints(PhoneCameraConfig)["capture_mode"]
+    ):
+        raise ValueError(
+            f"Invalid phone_camera.capture_mode={config.phone_camera.capture_mode!r}; "
+            f"expected one of {get_args(get_type_hints(PhoneCameraConfig)['capture_mode'])}"
+        )
+    if config.droidcam.video_format not in get_args(get_type_hints(DroidCamConfig)["video_format"]):
+        raise ValueError(
+            f"Invalid droidcam.video_format={config.droidcam.video_format!r}; "
+            f"expected one of {get_args(get_type_hints(DroidCamConfig)['video_format'])}"
+        )
     if config.models.precision not in get_args(get_type_hints(ModelConfig)["precision"]):
         raise ValueError(
             f"Invalid models.precision={config.models.precision!r}; "
@@ -112,10 +165,44 @@ def _validate_config(config: PipelineConfig) -> None:
             f"Invalid comms.channel={config.comms.channel!r}; "
             f"expected one of {get_args(get_type_hints(CommConfig)['channel'])}"
         )
+    if config.preflight.check_interval_frames < 1:
+        raise ValueError("Invalid preflight.check_interval_frames; expected >= 1")
     if config.flags.log_level not in get_args(get_type_hints(RuntimeFlags)["log_level"]):
         raise ValueError(
             f"Invalid flags.log_level={config.flags.log_level!r}; "
             f"expected one of {get_args(get_type_hints(RuntimeFlags)['log_level'])}"
+        )
+    if config.flags.ring_buffer_slots < 3:
+        raise ValueError("Invalid runtime.ring_buffer_slots; expected >= 3")
+    if not (
+        0.0
+        <= config.tracking.lock_keep_confidence
+        <= config.tracking.lock_acquire_confidence
+        <= 1.0
+    ):
+        raise ValueError(
+            "Invalid tracking lock confidence hysteresis; expected "
+            "0 <= lock_keep_confidence <= lock_acquire_confidence <= 1"
+        )
+    if config.tracking.low_confidence_grace_frames < 0:
+        raise ValueError("Invalid tracking.low_confidence_grace_frames; expected >= 0")
+    if config.relay.pulse_ms < 0:
+        raise ValueError("Invalid relay.pulse_ms; expected >= 0")
+    if config.relay.auto_fire_pulse_ms < 1:
+        raise ValueError("Invalid relay.auto_fire_pulse_ms; expected >= 1")
+    schedule = config.tracking.inference_schedule
+    if schedule.detector_locked_stride < 1:
+        raise ValueError(
+            "Invalid tracking.inference_schedule.detector_locked_stride; expected >= 1"
+        )
+    if not 0.0 <= schedule.detector_min_skip_confidence <= 1.0:
+        raise ValueError(
+            "Invalid tracking.inference_schedule.detector_min_skip_confidence; "
+            "expected 0 <= value <= 1"
+        )
+    if schedule.detector_max_prediction_age_ms <= 0.0:
+        raise ValueError(
+            "Invalid tracking.inference_schedule.detector_max_prediction_age_ms; expected > 0"
         )
 
 
@@ -190,6 +277,7 @@ def build_config_from_yaml(
         height=cli.get("height") if cli.get("height") is not None else cam_cfg.get("height", 640),
         fps=cli.get("fps") if cli.get("fps") is not None else cam_cfg.get("fps", 60),
         backend=cli.get("backend") or cam_cfg.get("backend", "auto"),
+        source_backend=cli.get("source_backend") or cam_cfg.get("source_backend", "opencv"),
         buffer_size=int(cam_cfg.get("buffer_size", 1)),
         orientation=orientation,
         fov=float(fov_raw) if fov_raw is not None else None,
@@ -253,6 +341,10 @@ def build_config_from_yaml(
         smoothing = _overlay_dataclass(tracking.smoothing, trk_cfg.get("smoothing", {}))
         postprocess = _overlay_dataclass(tracking.postprocess, trk_cfg.get("postprocess", {}))
         adaptive = _overlay_dataclass(tracking.adaptive, trk_cfg.get("adaptive", {}))
+        inference_schedule = _overlay_dataclass(
+            tracking.inference_schedule,
+            trk_cfg.get("inference_schedule", {}),
+        )
 
         # Top-level tracking overrides
         tracking_overrides = {
@@ -260,9 +352,13 @@ def build_config_from_yaml(
             "smoothing": smoothing,
             "postprocess": postprocess,
             "adaptive": adaptive,
+            "inference_schedule": inference_schedule,
         }
         for key in (
             "confidence_threshold",
+            "lock_acquire_confidence",
+            "lock_keep_confidence",
+            "low_confidence_grace_frames",
             "hold_time_s",
             "max_lost_frames",
             "process_noise",
@@ -270,6 +366,7 @@ def build_config_from_yaml(
             "tracker_match_threshold",
             "tracker_track_threshold",
             "tracker_birth_min_hits",
+            "egomotion_compensation_enabled",
         ):
             if key in trk_cfg:
                 tracking_overrides[key] = type(getattr(tracking, key))(trk_cfg[key])
@@ -293,6 +390,7 @@ def build_config_from_yaml(
             else (Path(rt_cfg["log_file"]) if rt_cfg.get("log_file") else None)
         ),
         log_level="DEBUG" if debug else (cli.get("log_level") or rt_cfg.get("log_level", "INFO")),
+        ring_buffer_slots=int(rt_cfg.get("ring_buffer_slots", 8)),
         gpu_preprocess=bool(
             cli.get("gpu_preprocess", False) or rt_cfg.get("gpu_preprocess", False)
         ),
@@ -340,10 +438,26 @@ def build_config_from_yaml(
     relay_cfg = yaml_data.get("relay", {})
     relay = RelayConfig(
         pulse_ms=int(relay_cfg.get("pulse_ms", 500)),
+        auto_fire_enabled=_parse_bool(
+            relay_cfg.get("auto_fire_enabled", False), "relay.auto_fire_enabled"
+        ),
+        auto_fire_pulse_ms=int(relay_cfg.get("auto_fire_pulse_ms", 100)),
     )
 
     servo_ctrl_cfg = yaml_data.get("servo_control", {})
     servo_control = _overlay_dataclass(ServoControlConfig(), servo_ctrl_cfg)
+
+    phone_camera_cfg = yaml_data.get("phone_camera", {})
+    phone_camera = _overlay_dataclass(PhoneCameraConfig(), phone_camera_cfg)
+
+    phone_imu_cfg = yaml_data.get("phone_imu", {})
+    phone_imu = _overlay_dataclass(PhoneImuConfig(), phone_imu_cfg)
+
+    droidcam_cfg = yaml_data.get("droidcam", {})
+    droidcam = _overlay_dataclass(DroidCamConfig(), droidcam_cfg)
+
+    search_cfg = yaml_data.get("search", {})
+    search = _overlay_dataclass(SearchConfig(), search_cfg)
 
     pf_cfg = yaml_data.get("preflight", {})
     preflight = _overlay_dataclass(PreflightConfig(), pf_cfg)
@@ -366,6 +480,10 @@ def build_config_from_yaml(
         preflight=preflight,
         relay=relay,
         servo_control=servo_control,
+        phone_camera=phone_camera,
+        phone_imu=phone_imu,
+        droidcam=droidcam,
+        search=search,
     )
     _validate_config(config)
     return config

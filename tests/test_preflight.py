@@ -30,7 +30,7 @@ def _blurry_frame(shape: tuple[int, ...] = (64, 64, 3)) -> np.ndarray:
 @pytest.mark.unit
 def test_healthy_feed_no_warnings() -> None:
     """Constant-brightness frames produce no warnings."""
-    config = PreflightConfig(enabled=True, window_size=10)
+    config = PreflightConfig(enabled=True, window_size=10, check_interval_frames=1)
     monitor = FrameHealthMonitor(config)
 
     frame = _constant_frame(128)
@@ -46,6 +46,7 @@ def test_brightness_hunting_warns() -> None:
     config = PreflightConfig(
         enabled=True,
         window_size=10,
+        check_interval_frames=1,
         brightness_stddev_warn=5.0,  # low threshold for test
         warn_cooldown_s=0.0,  # no cooldown
     )
@@ -68,6 +69,7 @@ def test_sharpness_drop_warns() -> None:
     config = PreflightConfig(
         enabled=True,
         window_size=10,
+        check_interval_frames=1,
         sharpness_drop_warn=0.3,  # 30% drop threshold
         warn_cooldown_s=0.0,
     )
@@ -94,6 +96,7 @@ def test_cooldown_prevents_spam() -> None:
     config = PreflightConfig(
         enabled=True,
         window_size=5,
+        check_interval_frames=1,
         brightness_stddev_warn=1.0,  # very low threshold
         warn_cooldown_s=100.0,  # very long cooldown
     )
@@ -134,7 +137,12 @@ def test_disabled_returns_empty() -> None:
 @pytest.mark.unit
 def test_insufficient_data_no_warnings() -> None:
     """Monitor doesn't warn until window is full."""
-    config = PreflightConfig(enabled=True, window_size=20, warn_cooldown_s=0.0)
+    config = PreflightConfig(
+        enabled=True,
+        window_size=20,
+        check_interval_frames=1,
+        warn_cooldown_s=0.0,
+    )
     monitor = FrameHealthMonitor(config)
 
     for i in range(19):
@@ -160,3 +168,47 @@ def test_frame_drop_sample_window_is_tunable() -> None:
     """The knob must be overridable so ops can widen or tighten the window."""
     config = PreflightConfig(frame_drop_sample_window=600)
     assert config.frame_drop_sample_window == 600
+
+
+@pytest.mark.unit
+def test_preflight_skips_expensive_check_between_intervals(monkeypatch) -> None:
+    """Laplacian runs only on configured sample frames when preflight is enabled."""
+    config = PreflightConfig(enabled=True, window_size=2, check_interval_frames=3)
+    monitor = FrameHealthMonitor(config)
+    frame = _constant_frame(128, shape=(16, 16, 3))
+    calls = 0
+
+    def fake_laplacian(gray, dtype):
+        nonlocal calls
+        calls += 1
+        return np.ones_like(gray, dtype=np.float64)
+
+    monkeypatch.setattr("src.shared.preflight.cv2.Laplacian", fake_laplacian)
+
+    monitor.check(frame)
+    monitor.check(frame)
+    monitor.check(frame)
+    monitor.check(frame)
+
+    assert calls == 1
+
+
+@pytest.mark.unit
+def test_preflight_does_not_replay_sampled_warning_between_intervals() -> None:
+    """Warnings are events; skipped frames must not spam the last sampled warning."""
+    config = PreflightConfig(
+        enabled=True,
+        window_size=1,
+        check_interval_frames=2,
+        brightness_stddev_warn=-1.0,
+        warn_cooldown_s=0.0,
+    )
+    monitor = FrameHealthMonitor(config)
+    frame = _constant_frame(128, shape=(16, 16, 3))
+
+    assert monitor.check(frame) == []
+    sampled_warnings = monitor.check(frame)
+    skipped_warnings = monitor.check(frame)
+
+    assert any("brightness hunting" in warning for warning in sampled_warnings)
+    assert skipped_warnings == []

@@ -1,0 +1,24 @@
+version: 2
+updates:
+  # Workflow action versions (checkout, setup-python, codecov).
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      github-actions:
+        patterns: ["*"]
+
+  # requirements*.txt, including the pinned lint toolchain in requirements-lint.txt.
+  # CI runs the full test suite and lint on every update PR; runtime packages
+  # (ultralytics, opencv, av) still need a manual check on the real hardware.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: monthly
+    open-pull-requests-limit: 5
+    groups:
+      lint-tools:
+        patterns: ["ruff", "black", "mypy"]
+      test-tools:
+        patterns: ["pytest*", "coverage"]

@@ -55,6 +55,7 @@ def _make_message(
 
 
 def _config(**overrides) -> AutoControllerConfig:
+    servo_overrides = overrides.pop("servo_control", {})
     base = GimbalConfig(
         kp=1.5,
         kd=0.0,
@@ -68,7 +69,8 @@ def _config(**overrides) -> AutoControllerConfig:
     )
     for key, value in overrides.items():
         base = base.__class__(**{**base.__dict__, key: value})
-    return AutoControllerConfig.from_configs(base, ServoControlConfig())
+    servo = ServoControlConfig(**{**ServoControlConfig().__dict__, **servo_overrides})
+    return AutoControllerConfig.from_configs(base, servo)
 
 
 @pytest.mark.unit
@@ -253,3 +255,144 @@ def test_lead_compensation_adds_to_error_when_target_is_fast() -> None:
 
     # The fast-target integral should be larger because lead added to the error.
     assert fast.pi_integral_pan > slow.pi_integral_pan
+
+
+@pytest.mark.unit
+def test_auto_command_slew_limit_caps_output_step() -> None:
+    state = AutoControllerState()
+    cfg = _config(
+        kp=100.0,
+        kd=0.0,
+        deadband_deg=0.0,
+        slew_limit_dps=1000.0,
+        servo_control={"auto_command_slew_limit_dps": 30.0},
+    )
+
+    compute_auto_command(
+        message=_make_message(servo_angles=(0.0, 0.0), timestamp_ns=_TS_BASE),
+        state=state,
+        config=cfg,
+    )
+    pan, _ = compute_auto_command(
+        message=_make_message(
+            servo_angles=(radians(45.0), 0.0),
+            timestamp_ns=_TS_BASE + 100_000_000,
+        ),
+        state=state,
+        config=cfg,
+    )
+
+    assert pan == pytest.approx(3.0)
+    assert state.pi_integral_pan == pytest.approx(3.0)
+
+
+@pytest.mark.unit
+def test_same_track_micro_relock_softens_first_reacquired_command() -> None:
+    base_cfg = dict(
+        kp=5.0,
+        kd=0.0,
+        deadband_deg=0.0,
+        slew_limit_dps=100.0,
+    )
+    base_servo = {
+        "micro_relock_min_loss_s": 0.025,
+        "micro_relock_window_s": 0.12,
+        "micro_relock_ramp_frames": 4,
+    }
+    softened = AutoControllerState()
+    normal = AutoControllerState()
+    soft_cfg = _config(
+        **base_cfg,
+        servo_control={**base_servo, "micro_relock_gain": 0.25},
+    )
+    normal_cfg = _config(
+        **base_cfg,
+        servo_control={**base_servo, "micro_relock_gain": 1.0},
+    )
+
+    for state, cfg in ((softened, soft_cfg), (normal, normal_cfg)):
+        compute_auto_command(
+            message=_make_message(
+                servo_angles=(0.0, 0.0),
+                timestamp_ns=_TS_BASE,
+                track_id=7,
+            ),
+            state=state,
+            config=cfg,
+        )
+        compute_auto_command(
+            message=_make_message(
+                target_acquired=False,
+                state_source="prediction",
+                servo_angles=(0.0, 0.0),
+                timestamp_ns=_TS_BASE + 30_000_000,
+                track_id=7,
+            ),
+            state=state,
+            config=cfg,
+        )
+
+    soft_pan, _ = compute_auto_command(
+        message=_make_message(
+            servo_angles=(radians(20.0), 0.0),
+            timestamp_ns=_TS_BASE + 80_000_000,
+            track_id=7,
+        ),
+        state=softened,
+        config=soft_cfg,
+    )
+    normal_pan, _ = compute_auto_command(
+        message=_make_message(
+            servo_angles=(radians(20.0), 0.0),
+            timestamp_ns=_TS_BASE + 80_000_000,
+            track_id=7,
+        ),
+        state=normal,
+        config=normal_cfg,
+    )
+
+    assert soft_pan < normal_pan * 0.6
+
+
+@pytest.mark.unit
+def test_long_relock_does_not_use_micro_loss_softening() -> None:
+    cfg = _config(
+        kp=5.0,
+        kd=0.0,
+        deadband_deg=0.0,
+        slew_limit_dps=100.0,
+        servo_control={
+            "micro_relock_min_loss_s": 0.025,
+            "micro_relock_window_s": 0.12,
+            "micro_relock_gain": 0.25,
+            "micro_relock_ramp_frames": 4,
+        },
+    )
+    state = AutoControllerState()
+    compute_auto_command(
+        message=_make_message(servo_angles=(0.0, 0.0), timestamp_ns=_TS_BASE, track_id=7),
+        state=state,
+        config=cfg,
+    )
+    compute_auto_command(
+        message=_make_message(
+            target_acquired=False,
+            state_source="prediction",
+            servo_angles=(0.0, 0.0),
+            timestamp_ns=_TS_BASE + 30_000_000,
+            track_id=7,
+        ),
+        state=state,
+        config=cfg,
+    )
+    pan, _ = compute_auto_command(
+        message=_make_message(
+            servo_angles=(radians(20.0), 0.0),
+            timestamp_ns=_TS_BASE + 300_000_000,
+            track_id=7,
+        ),
+        state=state,
+        config=cfg,
+    )
+
+    assert pan == pytest.approx(10.0)

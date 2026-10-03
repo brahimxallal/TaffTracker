@@ -13,6 +13,7 @@ from pathlib import Path
 
 from src.config import PipelineConfig
 from src.config_loader import build_config_from_yaml, load_yaml_config
+from src.inference.engine_validation import validate_tensorrt_engine_compatibility
 from src.shared.pose_schema import get_pose_schema
 
 LOGGER = logging.getLogger("main")
@@ -37,6 +38,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--height", type=int, default=None)
     parser.add_argument("--fps", type=int, default=None)
     parser.add_argument("--backend", default=None, choices=("auto", "dshow", "msmf", "ffmpeg"))
+    parser.add_argument(
+        "--source-backend",
+        default=None,
+        choices=("opencv", "phone_yuv", "phone_mpeg", "phone_h264", "droidcam"),
+        help="Capture source implementation for the next run",
+    )
     parser.add_argument(
         "--confidence", type=float, default=None, help="Override default confidence threshold"
     )
@@ -95,6 +102,7 @@ def validate_environment(config: PipelineConfig) -> None:
         raise FileNotFoundError(
             f"Required TensorRT engine missing: {engine_path}. Run scripts/export_engines.py first."
         )
+    validate_tensorrt_engine_compatibility(engine_path)
 
     source = config.source.strip()
     is_stream_source = source.lower().startswith(("http://", "https://", "rtsp://"))
