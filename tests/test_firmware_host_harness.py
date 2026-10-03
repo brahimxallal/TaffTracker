@@ -8,14 +8,17 @@ stubs (``firmware/esp32s3_gimbal/host_tests/stubs``) and run under AddressSaniti
 * Relay fail-safe - the relay must be released when the host stops sending.
 
 The tests are skipped when no C compiler (or no sanitizer runtime) is available, so they never
-block a CPU-only or Windows development machine.
+block a CPU-only or Windows development machine. On CI (``CI=true``) that is an error instead, so
+these safety checks cannot disappear silently when a runner image changes.
 """
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 from pathlib import Path
+from typing import NoReturn
 
 import pytest
 
@@ -23,14 +26,22 @@ ROOT = Path(__file__).resolve().parents[1]
 FIRMWARE = ROOT / "firmware" / "esp32s3_gimbal"
 HOST_TESTS = FIRMWARE / "host_tests"
 CC = shutil.which("gcc") or shutil.which("cc") or shutil.which("clang")
+# GitHub Actions and most other CI systems set CI=true.
+IN_CI = os.environ.get("CI", "").strip().lower() in {"1", "true", "yes"}
 
-pytestmark = [
-    pytest.mark.unit,
-    pytest.mark.skipif(CC is None, reason="no C compiler available"),
-]
+pytestmark = pytest.mark.unit
+
+
+def _unavailable(reason: str) -> NoReturn:
+    """Skip on a developer machine, fail on CI (the safety checks must not vanish silently)."""
+    if IN_CI:
+        pytest.fail(f"{reason}; required on CI")
+    pytest.skip(reason)
 
 
 def _compile(out_dir: Path, harness: str, define: str, source: str) -> Path:
+    if CC is None:
+        _unavailable("no C compiler available")
     exe = out_dir / Path(harness).stem
     base = [
         str(CC),
@@ -58,7 +69,7 @@ def _compile(out_dir: Path, harness: str, define: str, source: str) -> Path:
         return exe
     plain = subprocess.run(base, capture_output=True, text=True, check=False)
     if plain.returncode == 0:
-        pytest.skip("C compiler has no AddressSanitizer/UBSan runtime")
+        _unavailable("C compiler has no AddressSanitizer/UBSan runtime")
     pytest.fail(f"firmware host harness failed to compile:\n{plain.stderr}")
 
 

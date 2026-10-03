@@ -15,7 +15,8 @@ concurrency:
 
 jobs:
   pytest:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moves to Ubuntu 26.04 on 2026-10-19. Bump it deliberately.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
@@ -28,8 +29,8 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements-dev.txt
 
-      # -rs lists skipped tests with their reasons, so a silently skipped firmware
-      # host test (no C compiler / sanitizer on the runner) shows up in the log.
+      # With CI=true the firmware host tests (gcc + ASan/UBSan) fail instead of skipping
+      # when the toolchain is missing; -rs lists any other skipped tests with reasons.
       - name: Run tests (no perf)
         run: pytest -m "not perf" -rs --cov=src --cov-report=xml --cov-report=term
 

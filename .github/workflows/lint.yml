@@ -15,7 +15,8 @@ concurrency:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moves to Ubuntu 26.04 on 2026-10-19. Bump it deliberately.
+    runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4

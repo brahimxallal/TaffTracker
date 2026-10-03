@@ -29,7 +29,8 @@ CI also runs `ruff check .`, `black --check .` and a non-blocking `mypy src`.
 and `pre-commit run --all-files` runs the same ruff and black. mypy is a manual
 hook: `pre-commit run --hook-stage manual mypy --all-files`.
 The firmware host tests (`tests/test_firmware_host_harness.py`) need gcc or
-clang and skip themselves otherwise.
+clang with its sanitizer runtime. They skip themselves on a machine without one
+and fail when `CI=true`, so CI cannot lose them silently.
 
 ## Commit convention
 
