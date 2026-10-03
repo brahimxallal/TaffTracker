@@ -11,6 +11,7 @@ LOGGER = logging.getLogger(__name__)
 
 APP_ID = "com.tafftracker.taffcam"
 START_ACTION = f"{APP_ID}.START"
+START_SENSORS_ACTION = f"{APP_ID}.START_SENSORS"
 
 _EXTRA_ORDER = (
     ("--ei", "width", "int"),
@@ -27,6 +28,9 @@ _EXTRA_ORDER = (
     ("--ez", "awb_lock", "bool"),
     ("--ez", "torch_enabled", "bool"),
     ("--ef", "focus_diopters", "float"),
+    ("--ez", "imu_enabled", "bool"),
+    ("--ez", "sensor_only", "bool"),
+    ("--ei", "imu_rate_hz", "int"),
 )
 
 
@@ -37,6 +41,7 @@ class TaffCamLaunchConfig:
     app_package: str = APP_ID
     app_activity: str = ".MainActivity"
     app_receiver: str = ".TaffCommandReceiver"
+    app_service: str = ".TaffSensorService"
     start_action: str = START_ACTION
     start_delay_s: float = 1.0
     command_timeout_s: float = 6.0
@@ -84,6 +89,41 @@ def start_taffcam_app(config: TaffCamLaunchConfig, controls: Mapping[str, Any]) 
         ["shell", "am", "broadcast", "-n", receiver, "-a", config.start_action, *extras],
     )
     _log_adb_failure("broadcast TaffCam start", broadcast)
+
+
+def start_taffcam_sensor_service(
+    config: TaffCamLaunchConfig,
+    controls: Mapping[str, Any],
+) -> None:
+    if config.force_stop_before_start:
+        force_stop = _run_adb(
+            config,
+            ["shell", "am", "force-stop", config.app_package],
+            timeout_s=config.command_timeout_s,
+        )
+        _log_adb_failure("force-stop TaffCam", force_stop)
+    if config.wake_screen:
+        _run_adb(config, ["shell", "input", "keyevent", "224"], timeout_s=2.0)
+    if config.dismiss_keyguard:
+        _run_adb(config, ["shell", "wm", "dismiss-keyguard"], timeout_s=2.0)
+
+    extras = build_adb_start_extras(controls)
+    activity = _component(config.app_package, config.app_activity)
+    action = START_SENSORS_ACTION if config.start_action == START_ACTION else config.start_action
+    start = _run_adb(
+        config,
+        [
+            "shell",
+            "am",
+            "start",
+            "-n",
+            activity,
+            "-a",
+            action,
+            *extras,
+        ],
+    )
+    _log_adb_failure("start TaffCam sensor service", start)
 
 
 def _format_extra(value: Any, value_type: str) -> str:

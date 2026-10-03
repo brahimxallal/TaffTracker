@@ -8,6 +8,7 @@ from src.capture.taffcam_adb import (
     TaffCamLaunchConfig,
     build_adb_start_extras,
     start_taffcam_app,
+    start_taffcam_sensor_service,
 )
 
 
@@ -153,3 +154,50 @@ def test_start_taffcam_app_can_force_stop_before_start(monkeypatch) -> None:
     assert calls[0] == ["adb", "shell", "am", "force-stop", "com.tafftracker.taffcam"]
     assert calls[1] == ["adb", "shell", "wm", "dismiss-keyguard"]
     assert calls[2][:6] == ["adb", "shell", "am", "start", "-n", "com.tafftracker.taffcam/.MainActivity"]
+
+
+@pytest.mark.unit
+def test_start_taffcam_sensor_service_routes_through_exported_activity(monkeypatch) -> None:
+    calls: list[list[str]] = []
+
+    def fake_run(cmd, **_kwargs):
+        calls.append(list(cmd))
+        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+
+    monkeypatch.setattr("src.capture.taffcam_adb.subprocess.run", fake_run)
+
+    start_taffcam_sensor_service(
+        TaffCamLaunchConfig(adb_serial="DEVICE", wake_screen=False, dismiss_keyguard=False),
+        {
+            "imu_enabled": True,
+            "sensor_only": True,
+            "imu_rate_hz": 200,
+        },
+    )
+
+    assert calls == [
+        [
+            "adb",
+            "-s",
+            "DEVICE",
+            "shell",
+            "am",
+            "start",
+            "-n",
+            "com.tafftracker.taffcam/.MainActivity",
+            "-a",
+            "com.tafftracker.taffcam.START_SENSORS",
+            "--ez",
+            "taff_start",
+            "true",
+            "--ez",
+            "imu_enabled",
+            "true",
+            "--ez",
+            "sensor_only",
+            "true",
+            "--ei",
+            "imu_rate_hz",
+            "200",
+        ]
+    ]
