@@ -302,7 +302,11 @@ static void usb_rx_task(void *arg)
             }
             frame[frame_pos++] = buf[i];
 
-            if (frame_pos == frame_expected) {
+            /* >= (not ==): after a resync the kept bytes can already exceed the new
+             * frame's expected length (e.g. a 0xCC cal header found early in a corrupted
+             * 21-byte frame). With == the completion test never fired again and
+             * frame[] was overrun on the stack. */
+            if (frame_pos >= frame_expected) {
                 if (frame_header == PROTO_HEADER_V2) {
                     tracking_packet_v2_t pkt;
                     if (packet_parse(frame, PROTO_PACKET_SIZE, &pkt)) {
