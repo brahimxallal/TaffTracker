@@ -291,7 +291,9 @@ class PhoneYuvCaptureSource:
                 frame = self._read_latest_frame()
             except (EOFError, OSError, ValueError) as exc:
                 if not self._reader_stop.is_set() and not self._released:
-                    LOGGER.warning("Phone YUV background reader failed; waiting for reconnect: %s", exc)
+                    LOGGER.warning(
+                        "Phone YUV background reader failed; waiting for reconnect: %s", exc
+                    )
                 self._close_frame_socket_from_reader()
                 return
             if frame is None:
@@ -555,9 +557,7 @@ class PhoneYuvCaptureSource:
 
         expected_len = width * height * 3 // 2
         if len(payload) != expected_len:
-            raise ValueError(
-                f"invalid phone YUV payload length: {len(payload)} != {expected_len}"
-            )
+            raise ValueError(f"invalid phone YUV payload length: {len(payload)} != {expected_len}")
 
         yuv = np.frombuffer(payload, dtype=np.uint8).reshape((height * 3 // 2, width))
         if header.pixel_format == PIXEL_FORMAT_I420:

@@ -65,9 +65,7 @@ def main() -> None:
     print(f"total_samples={total_samples}")
     print(f"host_sample_rate={total_samples / elapsed_s:.1f}")
     for name in sorted(per_sensor):
-        span_s = (
-            max(last_timestamp_ns[name] - first_timestamp_ns[name], 0) / 1_000_000_000.0
-        )
+        span_s = max(last_timestamp_ns[name] - first_timestamp_ns[name], 0) / 1_000_000_000.0
         print(f"sensor={name} last_sequence={per_sensor[name]} android_span_s={span_s:.3f}")
 
 

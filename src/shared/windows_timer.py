@@ -72,9 +72,7 @@ class WindowsTimerResolution:
                 LOGGER.warning("timeEndPeriod(%d) unavailable: %s", self.period_ms, err)
             else:
                 if result != 0:
-                    LOGGER.warning(
-                        "timeEndPeriod(%d) failed with code %s", self.period_ms, result
-                    )
+                    LOGGER.warning("timeEndPeriod(%d) failed with code %s", self.period_ms, result)
             finally:
                 self._active = False
                 self._enter_depth = 0

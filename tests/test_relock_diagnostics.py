@@ -44,7 +44,9 @@ def test_relock_diagnostics_emits_event_on_lost_to_measurement_transition() -> N
     )
     reacquired = _message(frame_id=11, timestamp_ns=1_150_000_000, track_id=8)
 
-    assert diag.observe(lost, command_deg=(1.0, 2.0), velocity_dps=(0.0, 0.0), state_flags=0) is None
+    assert (
+        diag.observe(lost, command_deg=(1.0, 2.0), velocity_dps=(0.0, 0.0), state_flags=0) is None
+    )
     event = diag.observe(
         reacquired,
         command_deg=(5.0, -1.0),
@@ -79,7 +81,9 @@ def test_relock_diagnostics_suppresses_same_track_micro_loss() -> None:
     reacquired = _message(frame_id=11, timestamp_ns=1_060_000_000, track_id=7)
 
     assert diag.observe(acquired, command_deg=(1.0, 2.0), velocity_dps=(0.0, 0.0), state_flags=0)
-    assert diag.observe(lost, command_deg=(1.0, 2.0), velocity_dps=(0.0, 0.0), state_flags=0) is None
+    assert (
+        diag.observe(lost, command_deg=(1.0, 2.0), velocity_dps=(0.0, 0.0), state_flags=0) is None
+    )
     assert (
         diag.observe(
             reacquired,

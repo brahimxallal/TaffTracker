@@ -256,8 +256,7 @@ def main() -> int:
         "port": args.port,
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "http": [
-            asdict(probe_http(args.host, args.port, path, args.timeout_s))
-            for path in endpoints
+            asdict(probe_http(args.host, args.port, path, args.timeout_s)) for path in endpoints
         ],
         "streams": [
             asdict(

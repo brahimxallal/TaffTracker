@@ -438,7 +438,9 @@ def build_config_from_yaml(
     relay_cfg = yaml_data.get("relay", {})
     relay = RelayConfig(
         pulse_ms=int(relay_cfg.get("pulse_ms", 500)),
-        auto_fire_enabled=_parse_bool(relay_cfg.get("auto_fire_enabled", False), "relay.auto_fire_enabled"),
+        auto_fire_enabled=_parse_bool(
+            relay_cfg.get("auto_fire_enabled", False), "relay.auto_fire_enabled"
+        ),
         auto_fire_pulse_ms=int(relay_cfg.get("auto_fire_pulse_ms", 100)),
     )
 

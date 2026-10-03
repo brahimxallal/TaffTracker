@@ -173,8 +173,7 @@ def test_latest_frame_read_bounds_nonblocking_socket_drain(monkeypatch):
         recv_calls += 1
         sequence = recv_calls
         source._recv_buffer.extend(
-            pack_frame_header(_header(sequence=sequence, payload_len=len(payload)))
-            + payload
+            pack_frame_header(_header(sequence=sequence, payload_len=len(payload))) + payload
         )
         return True
 

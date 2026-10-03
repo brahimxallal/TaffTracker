@@ -138,7 +138,16 @@ def _start_phone_app(args: argparse.Namespace) -> None:
     start = _run_adb(
         args.adb,
         args.serial,
-        ["shell", "am", "start", "-n", START_ACTIVITY, "-a", START_ACTION, *_adb_start_extras(args)],
+        [
+            "shell",
+            "am",
+            "start",
+            "-n",
+            START_ACTIVITY,
+            "-a",
+            START_ACTION,
+            *_adb_start_extras(args),
+        ],
     )
     if start.returncode != 0:
         print(start.stderr.strip() or start.stdout.strip())
@@ -189,7 +198,9 @@ def parse_args() -> argparse.Namespace:
         default="phone_h264",
         help="Capture backend to benchmark. phone_h264 is the low-latency encoder path.",
     )
-    parser.add_argument("--capture-mode", choices=("auto", "normal", "yuv", "high_speed"), default="auto")
+    parser.add_argument(
+        "--capture-mode", choices=("auto", "normal", "yuv", "high_speed"), default="auto"
+    )
     parser.add_argument("--codec", choices=("h264", "mpeg4"), default="h264")
     parser.add_argument("--bitrate-bps", type=int, default=8_000_000)
     parser.add_argument("--keyframe-interval-s", type=float, default=1.0)
@@ -219,9 +230,7 @@ def main() -> int:
 
     startup_controls = {
         "capture_mode": args.capture_mode,
-        "stream_format": "mpeg"
-        if args.source_backend in ("phone_mpeg", "phone_h264")
-        else "yuv",
+        "stream_format": "mpeg" if args.source_backend in ("phone_mpeg", "phone_h264") else "yuv",
         "exposure_ns": args.exposure_ns,
         "iso": args.iso,
         "awb_enabled": False,
@@ -300,7 +309,9 @@ def main() -> int:
             f"seq {first.sequence}->{last.sequence}, skipped={skipped}, "
             f"size={last.width}x{last.height}, {stream_label}"
         )
-        _print_stats("Android timestamp interval", _intervals([h.timestamp_ns for h in headers], 1e-6))
+        _print_stats(
+            "Android timestamp interval", _intervals([h.timestamp_ns for h in headers], 1e-6)
+        )
         _print_stats("Host receive interval", _intervals(host_ns, 1e-6))
         if last.exposure_ns:
             print(

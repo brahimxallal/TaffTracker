@@ -470,9 +470,7 @@ def _search_command(
         state.search_started_timestamp_ns = message.timestamp_ns
     state.search_active = True
 
-    search_elapsed_s = max(
-        0.0, (message.timestamp_ns - state.search_started_timestamp_ns) / 1e9
-    )
+    search_elapsed_s = max(0.0, (message.timestamp_ns - state.search_started_timestamp_ns) / 1e9)
     radius = min(
         max(0.0, search.max_radius_deg),
         max(0.0, search.initial_radius_deg)

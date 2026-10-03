@@ -22,8 +22,7 @@ def test_configure_process_logging_uses_env_log_file(
         root = logging.getLogger()
         assert root.level == logging.WARNING
         assert any(
-            isinstance(handler, logging.FileHandler)
-            and Path(handler.baseFilename) == log_file
+            isinstance(handler, logging.FileHandler) and Path(handler.baseFilename) == log_file
             for handler in root.handlers
         )
         assert log_file.parent.exists()

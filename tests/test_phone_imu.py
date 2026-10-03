@@ -65,7 +65,9 @@ def test_phone_imu_starts_android_service_after_listener_is_ready(monkeypatch) -
     def fake_start_sensor_service(config, controls):
         launches.append((config, controls))
 
-    monkeypatch.setattr("src.sensors.phone_imu.start_taffcam_sensor_service", fake_start_sensor_service)
+    monkeypatch.setattr(
+        "src.sensors.phone_imu.start_taffcam_sensor_service", fake_start_sensor_service
+    )
 
     receiver = PhoneImuReceiver(
         PhoneImuRuntimeConfig(

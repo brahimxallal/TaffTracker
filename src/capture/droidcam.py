@@ -69,11 +69,9 @@ class DroidCamControlResult:
 
 
 class DroidCamDecodeAdapter(Protocol):
-    def decode(self, *, pts: int, payload: bytes, is_config: bool) -> list[np.ndarray]:
-        ...
+    def decode(self, *, pts: int, payload: bytes, is_config: bool) -> list[np.ndarray]: ...
 
-    def close(self) -> None:
-        ...
+    def close(self) -> None: ...
 
 
 class PyAvDroidCamDecoder:
@@ -86,8 +84,7 @@ class PyAvDroidCamDecoder:
             av = importlib.import_module("av")
         except ModuleNotFoundError as exc:
             raise RuntimeError(
-                "droidcam source_backend requires PyAV (`pip install av`) "
-                "for avc/hevc streams"
+                "droidcam source_backend requires PyAV (`pip install av`) " "for avc/hevc streams"
             ) from exc
         codec_name = {"avc": "h264", "hevc": "hevc"}[video_format]
         self._av = av
@@ -147,9 +144,7 @@ class DroidCamRemoteControl:
         try:
             info = self._get_json("/v1/camera/info")
         except DroidCamRemoteError as exc:
-            return DroidCamControlResult(
-                warnings=(f"DroidCam remote controls unavailable: {exc}",)
-            )
+            return DroidCamControlResult(warnings=(f"DroidCam remote controls unavailable: {exc}",))
 
         def put(path: str, label: str) -> None:
             try:
@@ -465,8 +460,7 @@ class DroidCamDirectCaptureSource:
         now_s = time.monotonic()
         if self._stream_failures == 1 or now_s - self._last_failure_log_s >= 2.0:
             LOGGER.warning(
-                "DroidCam direct stream failed; reconnecting later: %s "
-                "(failures=%d)",
+                "DroidCam direct stream failed; reconnecting later: %s " "(failures=%d)",
                 exc,
                 self._stream_failures,
             )

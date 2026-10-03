@@ -574,9 +574,7 @@ class OutputProcess(mp.Process):
             tilt_vel_dps = 0.0
         else:
             pan_vel_dps = (pan_deg - self._last_auto_output_pan_deg) / dt_s if dt_s > 0 else 0.0
-            tilt_vel_dps = (
-                (tilt_deg - self._last_auto_output_tilt_deg) / dt_s if dt_s > 0 else 0.0
-            )
+            tilt_vel_dps = (tilt_deg - self._last_auto_output_tilt_deg) / dt_s if dt_s > 0 else 0.0
 
         self._last_auto_output_pan_deg = pan_deg
         self._last_auto_output_tilt_deg = tilt_deg

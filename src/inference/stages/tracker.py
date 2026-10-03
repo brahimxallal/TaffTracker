@@ -203,17 +203,14 @@ class TrackerStage:
                         return track, False
                     if track.lost_frames <= self._max_lost_frames:
                         reference_center = self._last_locked_reference_center(timestamp_ns)
-                        best_prox, best_dist = self._nearest_visible_track(
-                            tracks, reference_center
-                        )
+                        best_prox, best_dist = self._nearest_visible_track(tracks, reference_center)
                         if best_prox is not None:
                             old_id = self._locked_track_id
                             self._locked_track_id = best_prox.track_id
                             self._locked_missing_frames = 0
                             self._proximity_transfer = True
                             LOGGER.info(
-                                "Stale-lock proximity transfer: %d -> %d "
-                                "(lost=%d dist=%.1fpx)",
+                                "Stale-lock proximity transfer: %d -> %d " "(lost=%d dist=%.1fpx)",
                                 old_id,
                                 best_prox.track_id,
                                 track.lost_frames,

@@ -153,7 +153,14 @@ def test_start_taffcam_app_can_force_stop_before_start(monkeypatch) -> None:
 
     assert calls[0] == ["adb", "shell", "am", "force-stop", "com.tafftracker.taffcam"]
     assert calls[1] == ["adb", "shell", "wm", "dismiss-keyguard"]
-    assert calls[2][:6] == ["adb", "shell", "am", "start", "-n", "com.tafftracker.taffcam/.MainActivity"]
+    assert calls[2][:6] == [
+        "adb",
+        "shell",
+        "am",
+        "start",
+        "-n",
+        "com.tafftracker.taffcam/.MainActivity",
+    ]
 
 
 @pytest.mark.unit

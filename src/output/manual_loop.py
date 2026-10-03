@@ -118,7 +118,11 @@ def run_manual_tick_loop(
         pan_deg = manual_pan_deg * loop_config.pan_sign
         tilt_deg = manual_tilt_deg * loop_config.tilt_sign
         now_s = monotonic()
-        dt_s = tick_s if last_command_time_s is None else min(max(now_s - last_command_time_s, 0.0), 0.1)
+        dt_s = (
+            tick_s
+            if last_command_time_s is None
+            else min(max(now_s - last_command_time_s, 0.0), 0.1)
+        )
         last_command_time_s = now_s
         pan_deg, tilt_deg = command_limiter.limit(
             pan_deg,

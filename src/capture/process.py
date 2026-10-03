@@ -86,9 +86,7 @@ class CaptureProcess(mp.Process):
                 *_ENCODED_PHONE_BACKENDS,
                 "droidcam",
             )
-            source_is_file = (
-                not phone_source and isinstance(source, str) and Path(source).exists()
-            )
+            source_is_file = not phone_source and isinstance(source, str) and Path(source).exists()
             source_is_stream = isinstance(source, str) and not source_is_file
             live_source = phone_source or isinstance(source, int) or source_is_stream
             playback_interval_s = self._resolve_playback_interval(capture, source_is_file)
@@ -142,12 +140,8 @@ class CaptureProcess(mp.Process):
                         consecutive_read_failures += 1
                         if first_read_failure_ns is None:
                             first_read_failure_ns = time.perf_counter_ns()
-                        stall_ms = (
-                            time.perf_counter_ns() - first_read_failure_ns
-                        ) / 1_000_000.0
-                        phone_latest_frame_wait = (
-                            self._camera_config.source_backend == "phone_yuv"
-                        )
+                        stall_ms = (time.perf_counter_ns() - first_read_failure_ns) / 1_000_000.0
+                        phone_latest_frame_wait = self._camera_config.source_backend == "phone_yuv"
                         phone_yuv_stall_limit_ms = (
                             _PHONE_YUV_REOPEN_STALL_MS
                             if capture_has_delivered_frame
@@ -450,7 +444,9 @@ class CaptureProcess(mp.Process):
         phone = self._phone_camera_config
         return bool(phone.start_app_on_open and phone.adb_reverse_enabled)
 
-    def _build_phone_runtime_config(self, *, start_phone_app: bool = False) -> PhoneCameraRuntimeConfig:
+    def _build_phone_runtime_config(
+        self, *, start_phone_app: bool = False
+    ) -> PhoneCameraRuntimeConfig:
         phone = self._phone_camera_config
         return PhoneCameraRuntimeConfig(
             frame_host=phone.bind_host,

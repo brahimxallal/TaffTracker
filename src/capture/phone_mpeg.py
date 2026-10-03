@@ -98,11 +98,9 @@ class EncodedVideoDecoder(Protocol):
         self,
         header: EncodedAccessUnitHeader,
         payload: bytes,
-    ) -> np.ndarray | list[np.ndarray] | tuple[np.ndarray, ...] | None:
-        ...
+    ) -> np.ndarray | list[np.ndarray] | tuple[np.ndarray, ...] | None: ...
 
-    def close(self) -> None:
-        ...
+    def close(self) -> None: ...
 
 
 class PyAvVideoDecoder:

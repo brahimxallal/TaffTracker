@@ -62,7 +62,9 @@ def test_windows_timer_resolution_noops_when_not_windows() -> None:
 
 
 @pytest.mark.unit
-def test_windows_timer_resolution_does_not_end_failed_begin(caplog: pytest.LogCaptureFixture) -> None:
+def test_windows_timer_resolution_does_not_end_failed_begin(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     winmm = _FakeWinMM(begin_result=97)
 
     with caplog.at_level("WARNING"):

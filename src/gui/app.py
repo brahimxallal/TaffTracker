@@ -850,9 +850,8 @@ def _run_qt_app(config_path: Path) -> int:
         snapshot = session.poll()
         set_runtime_status(_snapshot_status(snapshot))
         set_runtime_buttons_enabled(snapshot.running)
-        if (
-            snapshot.runtime_control_version > 0
-            and pending_label.text().startswith("Runtime tuning")
+        if snapshot.runtime_control_version > 0 and pending_label.text().startswith(
+            "Runtime tuning"
         ):
             if snapshot.runtime_control_ack_version >= snapshot.runtime_control_version:
                 set_settings_status(

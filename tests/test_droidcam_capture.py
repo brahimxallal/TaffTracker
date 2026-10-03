@@ -44,9 +44,7 @@ def test_droidcam_video_request_uses_v5_encoded_stream_path() -> None:
         )
     )
 
-    assert request.startswith(
-        b"GET /v5/video/avc/640x480/port/0/os/win"
-    ) or request.startswith(
+    assert request.startswith(b"GET /v5/video/avc/640x480/port/0/os/win") or request.startswith(
         b"GET /v5/video/avc/640x480/port/0/os/linux"
     )
     assert b"/obs/7.0.0/client/243/nonce/5912/" in request
@@ -69,6 +67,7 @@ def test_droidcam_localhost_request_reports_adb_forward_port() -> None:
     )
 
     assert b"/port/4747/" in request
+
 
 @pytest.mark.unit
 def test_normalize_nal_payload_prefixes_single_raw_nal() -> None:
