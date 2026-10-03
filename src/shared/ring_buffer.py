@@ -56,7 +56,7 @@ class SharedRingBuffer:
         cls,
         frame_shape: tuple[int, ...],
         *,
-        num_slots: int = 3,
+        num_slots: int = 8,
         frame_dtype: np.dtype | type[np.generic] = np.uint8,
         context: mp.context.BaseContext | None = None,
     ) -> tuple[Self, Synchronized]:

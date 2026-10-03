@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import socket
 import subprocess
+import time
 
 import numpy as np
 import pytest
@@ -117,6 +118,77 @@ def test_latest_frame_drain_returns_newest_sequence():
     assert source.last_header is not None
     assert source.last_header.sequence == 2
     assert float(frame.mean()) > 150.0
+
+
+@pytest.mark.unit
+def test_background_reader_drains_to_latest_when_consumer_is_late():
+    sender, receiver = _socket_pair()
+    source = PhoneYuvCaptureSource.from_socket(
+        receiver,
+        PhoneCameraRuntimeConfig(read_timeout_s=0.05, background_reader=True),
+    )
+    old_payload = _i420_payload(25)
+    new_payload = _i420_payload(220)
+
+    try:
+        sender.sendall(
+            pack_frame_header(_header(sequence=1, payload_len=len(old_payload)))
+            + old_payload
+            + pack_frame_header(_header(sequence=2, payload_len=len(new_payload)))
+            + new_payload
+        )
+
+        deadline = time.monotonic() + 1.0
+        success = False
+        frame = None
+        while time.monotonic() < deadline:
+            success, frame = source.read()
+            if success:
+                break
+            time.sleep(0.005)
+    finally:
+        source.release()
+        sender.close()
+
+    assert success
+    assert frame is not None
+    assert source.last_header is not None
+    assert source.last_header.sequence == 2
+    assert float(frame.mean()) > 150.0
+
+
+@pytest.mark.unit
+def test_latest_frame_read_bounds_nonblocking_socket_drain(monkeypatch):
+    source = PhoneYuvCaptureSource(
+        PhoneCameraRuntimeConfig(read_timeout_s=0.05),
+        start_listening=False,
+    )
+    payload = _i420_payload(120)
+    recv_calls = 0
+
+    def fake_recv_into_buffer(*, timeout_s: float) -> bool:
+        nonlocal recv_calls
+        if recv_calls >= 100:
+            return False
+        recv_calls += 1
+        sequence = recv_calls
+        source._recv_buffer.extend(
+            pack_frame_header(_header(sequence=sequence, payload_len=len(payload)))
+            + payload
+        )
+        return True
+
+    monkeypatch.setattr(source, "_recv_into_buffer", fake_recv_into_buffer)
+
+    try:
+        frame = source._read_latest_frame()
+    finally:
+        source.release()
+
+    assert frame is not None
+    assert source.last_header is not None
+    assert source.last_header.sequence <= 4
+    assert recv_calls <= 4
 
 
 @pytest.mark.unit

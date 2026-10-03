@@ -21,6 +21,16 @@ def _read_from_attached_buffer(layout, write_index, result_queue) -> None:
 
 
 @pytest.mark.unit
+def test_ring_buffer_default_slot_count_is_eight() -> None:
+    buffer, _ = SharedRingBuffer.create((2, 2, 3))
+
+    try:
+        assert buffer.layout.num_slots == 8
+    finally:
+        buffer.cleanup()
+
+
+@pytest.mark.unit
 def test_ring_buffer_round_trip() -> None:
     buffer, write_index = SharedRingBuffer.create((4, 4, 3), num_slots=3)
     frame = np.full((4, 4, 3), 17, dtype=np.uint8)

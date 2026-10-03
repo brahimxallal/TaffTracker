@@ -17,6 +17,7 @@ from src.capture.droidcam import (
 from src.capture.phone_mpeg import PhoneMpegCaptureSource, PhoneMpegRuntimeConfig
 from src.capture.phone_yuv import PhoneCameraRuntimeConfig, PhoneYuvCaptureSource
 from src.config import CameraConfig, DroidCamConfig, PhoneCameraConfig
+from src.shared.logging_config import configure_process_logging
 from src.shared.ring_buffer import RingBufferLayout, SharedRingBuffer
 from src.shared.types import ProcessErrorReport
 
@@ -24,6 +25,9 @@ LOGGER = logging.getLogger("capture")
 
 _LIVE_READ_RETRY_SLEEP_S = 0.005
 _LIVE_READ_REOPEN_THRESHOLD = 30
+_PHONE_YUV_REOPEN_STALL_MS = 650.0
+_PHONE_YUV_INITIAL_CONNECT_STALL_MS = 1_500.0
+_PHONE_YUV_REOPEN_BACKOFF_S = 0.05
 _LIVE_REOPEN_BACKOFF_S = 0.25
 _OPEN_VALIDATION_ATTEMPTS = 8
 _OPEN_VALIDATION_SLEEP_S = 0.02
@@ -71,10 +75,7 @@ class CaptureProcess(mp.Process):
             )
 
         sys.excepthook = _excepthook
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s %(processName)s %(levelname)s %(message)s",
-        )
+        configure_process_logging()
         ring_buffer = SharedRingBuffer.attach(self._layout, self._write_index)
         capture = None
         try:
@@ -109,6 +110,7 @@ class CaptureProcess(mp.Process):
             frames_since_size_check = 0
             consecutive_read_failures = 0
             first_read_failure_ns: int | None = None
+            capture_has_delivered_frame = False
 
             while not self._shutdown_event.is_set():
                 if capture is None:
@@ -120,6 +122,7 @@ class CaptureProcess(mp.Process):
                         frames_since_size_check = 0
                         consecutive_read_failures = 0
                         first_read_failure_ns = None
+                        capture_has_delivered_frame = False
                         LOGGER.info("Live capture recovered after reopening source")
                     except RuntimeError as exc:
                         LOGGER.warning("Live capture reopen failed: %s", exc)
@@ -139,10 +142,23 @@ class CaptureProcess(mp.Process):
                         consecutive_read_failures += 1
                         if first_read_failure_ns is None:
                             first_read_failure_ns = time.perf_counter_ns()
-                        if consecutive_read_failures >= _LIVE_READ_REOPEN_THRESHOLD:
-                            stall_ms = (
-                                time.perf_counter_ns() - first_read_failure_ns
-                            ) / 1_000_000.0
+                        stall_ms = (
+                            time.perf_counter_ns() - first_read_failure_ns
+                        ) / 1_000_000.0
+                        phone_latest_frame_wait = (
+                            self._camera_config.source_backend == "phone_yuv"
+                        )
+                        phone_yuv_stall_limit_ms = (
+                            _PHONE_YUV_REOPEN_STALL_MS
+                            if capture_has_delivered_frame
+                            else _PHONE_YUV_INITIAL_CONNECT_STALL_MS
+                        )
+                        should_reopen = (
+                            stall_ms >= phone_yuv_stall_limit_ms
+                            if phone_latest_frame_wait
+                            else consecutive_read_failures >= _LIVE_READ_REOPEN_THRESHOLD
+                        )
+                        if should_reopen:
                             LOGGER.warning(
                                 "Live capture stalled for %.0f ms after %d failed reads; reopening source",
                                 stall_ms,
@@ -150,7 +166,12 @@ class CaptureProcess(mp.Process):
                             )
                             capture.release()
                             capture = None
-                            self._shutdown_event.wait(_LIVE_REOPEN_BACKOFF_S)
+                            reopen_backoff_s = (
+                                _PHONE_YUV_REOPEN_BACKOFF_S
+                                if phone_latest_frame_wait
+                                else _LIVE_REOPEN_BACKOFF_S
+                            )
+                            self._shutdown_event.wait(reopen_backoff_s)
                             continue
                         time.sleep(_LIVE_READ_RETRY_SLEEP_S)
                         continue
@@ -168,12 +189,20 @@ class CaptureProcess(mp.Process):
                     self._shutdown_event.set()
                     break
                 if consecutive_read_failures:
-                    LOGGER.info(
-                        "Live capture recovered after %d failed reads",
-                        consecutive_read_failures,
+                    recovery_ms = (
+                        (time.perf_counter_ns() - first_read_failure_ns) / 1_000_000.0
+                        if first_read_failure_ns is not None
+                        else 0.0
                     )
+                    if recovery_ms >= 100.0:
+                        LOGGER.info(
+                            "Live capture recovered after %d failed reads (%.0f ms)",
+                            consecutive_read_failures,
+                            recovery_ms,
+                        )
                     consecutive_read_failures = 0
                     first_read_failure_ns = None
+                capture_has_delivered_frame = True
 
                 # Resolution watcher: if the DroidCam user changes resolution
                 # mid-session the shape changes, so we force a letterbox recompute.
@@ -437,6 +466,7 @@ class CaptureProcess(mp.Process):
             adb_path=phone.adb_path,
             adb_serial=phone.adb_serial,
             adb_reverse_timeout_s=phone.adb_reverse_timeout_s,
+            background_reader=True,
             allow_remote_clients=phone.allow_remote_clients,
             start_phone_app=start_phone_app,
             force_stop_app=start_phone_app and phone.force_stop_app_on_open,

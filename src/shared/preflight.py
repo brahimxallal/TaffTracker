@@ -1,7 +1,7 @@
 """Frame health monitor for detecting AE/AWB/AF drift on phone cameras.
 
-Maintains rolling statistics of brightness and sharpness (Laplacian variance)
-and emits debounced warnings when thresholds are crossed.
+Maintains rolling statistics of sampled brightness and sharpness (Laplacian
+variance) and emits debounced warnings when thresholds are crossed.
 
 Lives in ``src/shared/`` because it is consumed by the inference process
 (not capture) — it analyses frames *after* they have crossed the shared
@@ -32,10 +32,14 @@ class FrameHealthMonitor:
         self._sharpness_buf: deque[float] = deque(maxlen=config.window_size)
         self._sharpness_max: float = 0.0
         self._last_warn_time: float = 0.0
+        self._frame_count: int = 0
 
     def check(self, frame: np.ndarray) -> list[str]:
         """Analyse a frame and return warning messages (empty if healthy)."""
         if not self._config.enabled:
+            return []
+        self._frame_count += 1
+        if self._frame_count % self._config.check_interval_frames != 0:
             return []
 
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if frame.ndim == 3 else frame
@@ -73,4 +77,4 @@ class FrameHealthMonitor:
         if warnings:
             self._last_warn_time = now
 
-        return warnings
+        return list(warnings)

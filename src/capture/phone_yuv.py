@@ -6,6 +6,7 @@ import logging
 import select
 import socket
 import subprocess
+import threading
 import time
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -29,6 +30,7 @@ LOGGER = logging.getLogger(__name__)
 
 _BACKEND_NAME = "TAFF_PHONE_YUV"
 _STATS_LOG_INTERVAL_FRAMES = 120
+_MAX_NONBLOCKING_DRAIN_READS_PER_FRAME = 3
 
 
 def _validate_bind_host(host: str, *, allow_remote_clients: bool) -> None:
@@ -73,6 +75,7 @@ class PhoneCameraRuntimeConfig:
     adb_path: str = "adb"
     adb_serial: str | None = None
     adb_reverse_timeout_s: float = 4.0
+    background_reader: bool = False
     allow_remote_clients: bool = False
     remove_adb_reverse_on_release: bool = False
     start_phone_app: bool = False
@@ -100,6 +103,12 @@ class PhoneYuvCaptureSource:
         self._frame_sock: socket.socket | None = None
         self._control_sock: socket.socket | None = None
         self._recv_buffer = bytearray()
+        self._reader_thread: threading.Thread | None = None
+        self._reader_stop = threading.Event()
+        self._latest_lock = threading.Lock()
+        self._latest_frame: np.ndarray | None = None
+        self._latest_header: FrameHeader | None = None
+        self._last_delivered_sequence: int | None = None
         self._released = False
         self._adb_reverse_started = False
         self._adb_reverse_attempted = False
@@ -123,6 +132,8 @@ class PhoneYuvCaptureSource:
         source = cls(config, start_listening=False)
         source._frame_sock = sock
         source._frame_sock.settimeout(source._config.read_timeout_s)
+        if source._config.background_reader:
+            source._start_background_reader()
         return source
 
     @property
@@ -155,6 +166,8 @@ class PhoneYuvCaptureSource:
     def read(self) -> tuple[bool, np.ndarray | None]:
         if self._released:
             return False, None
+        if self._config.background_reader:
+            return self._read_from_background_reader()
         if not self._ensure_frame_socket():
             return False, None
 
@@ -211,6 +224,8 @@ class PhoneYuvCaptureSource:
     def _ensure_frame_socket(self) -> bool:
         if self._frame_sock is not None:
             self._accept_control_socket()
+            if self._config.background_reader:
+                self._start_background_reader()
             return True
 
         self._ensure_listening()
@@ -231,7 +246,70 @@ class PhoneYuvCaptureSource:
         LOGGER.info("Phone YUV frame stream connected from %s", addr)
         self._accept_control_socket()
         self._send_startup_controls()
+        if self._config.background_reader:
+            self._start_background_reader()
         return True
+
+    def _read_from_background_reader(self) -> tuple[bool, np.ndarray | None]:
+        if not self._ensure_frame_socket():
+            return False, None
+
+        with self._latest_lock:
+            header = self._latest_header
+            frame = self._latest_frame
+            if header is None or frame is None:
+                return False, None
+            if (
+                self._last_delivered_sequence is not None
+                and header.sequence <= self._last_delivered_sequence
+            ):
+                return False, None
+            self._last_delivered_sequence = header.sequence
+            self._last_header = header
+            return True, frame
+
+    def _start_background_reader(self) -> None:
+        if self._reader_thread is not None and self._reader_thread.is_alive():
+            return
+        if self._frame_sock is None:
+            return
+        self._reader_stop.clear()
+        self._reader_thread = threading.Thread(
+            target=self._background_reader_loop,
+            name="PhoneYuvReader",
+            daemon=True,
+        )
+        self._reader_thread.start()
+
+    def _background_reader_loop(self) -> None:
+        while not self._reader_stop.is_set() and not self._released:
+            try:
+                frame = self._read_latest_frame()
+            except (EOFError, OSError, ValueError) as exc:
+                if not self._reader_stop.is_set() and not self._released:
+                    LOGGER.warning("Phone YUV background reader failed; waiting for reconnect: %s", exc)
+                self._close_frame_socket_from_reader()
+                return
+            if frame is None:
+                continue
+            header = self._last_header
+            if header is None:
+                continue
+            with self._latest_lock:
+                self._latest_header = header
+                self._latest_frame = frame
+
+    def _stop_background_reader(self) -> None:
+        self._reader_stop.set()
+        thread = self._reader_thread
+        if thread is not None and thread.is_alive() and threading.current_thread() is not thread:
+            thread.join(timeout=0.5)
+        if threading.current_thread() is not thread:
+            self._reader_thread = None
+        with self._latest_lock:
+            self._latest_header = None
+            self._latest_frame = None
+            self._last_delivered_sequence = None
 
     def _accept_control_socket(self) -> None:
         if self._control_sock is not None or self._control_listener is None:
@@ -351,7 +429,11 @@ class PhoneYuvCaptureSource:
             if not self._recv_into_buffer(timeout_s=remaining):
                 return None
 
-        while self._recv_into_buffer(timeout_s=0.0):
+        drain_reads = 0
+        while drain_reads < _MAX_NONBLOCKING_DRAIN_READS_PER_FRAME and self._recv_into_buffer(
+            timeout_s=0.0
+        ):
+            drain_reads += 1
             newer = self._pop_latest_complete_frame()
             if newer is not None:
                 latest = newer
@@ -539,8 +621,17 @@ class PhoneYuvCaptureSource:
                 LOGGER.debug("Failed to remove adb reverse for phone YUV port %d", port)
 
     def _close_frame_socket(self) -> None:
+        self._stop_background_reader()
         self._close_socket_attr("_frame_sock")
         self._recv_buffer.clear()
+
+    def _close_frame_socket_from_reader(self) -> None:
+        self._close_socket_attr("_frame_sock")
+        self._recv_buffer.clear()
+        with self._latest_lock:
+            self._latest_header = None
+            self._latest_frame = None
+            self._last_delivered_sequence = None
 
     def _close_control_socket(self) -> None:
         self._startup_controls_sent = False
