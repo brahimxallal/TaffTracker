@@ -5,7 +5,7 @@ import multiprocessing as mp
 
 import pytest
 
-from src.config import CameraConfig, CommConfig, GimbalConfig, TrackingConfig
+from src.config import CameraConfig, CommConfig, GimbalConfig, RelayConfig, TrackingConfig
 from src.output.process import OutputProcess
 from src.shared.protocol import (
     FLAG_HIGH_CONFIDENCE,
@@ -274,6 +274,95 @@ def test_relay_flag_off(output_process: OutputProcess) -> None:
     assert not (decoded.state & FLAG_RELAY_ON)
 
 
+@pytest.mark.unit
+def test_relay_auto_fire_disabled_does_not_set_relay_flag() -> None:
+    layout, write_index = SharedRingBuffer.create((480, 640, 3), num_slots=2)
+    proc = OutputProcess(
+        layout=layout.layout,
+        write_index=write_index,
+        result_queue=mp.Queue(),
+        shutdown_event=mp.Event(),
+        error_queue=mp.Queue(),
+        mode="camera",
+        camera_config=CameraConfig(width=640, height=480),
+        comm_config=CommConfig(),
+        tracking_config=TrackingConfig(),
+        relay_config=RelayConfig(auto_fire_enabled=False),
+    )
+    msg = _msg(target_acquired=True, timestamp_ns=1_000_000_000)
+    decoded = decode_packet_v2(proc._encode_packet(msg, 0))
+    assert not (decoded.state & FLAG_RELAY_ON)
+    layout.cleanup()
+
+
+@pytest.mark.unit
+def test_relay_auto_fire_pulses_for_100ms_on_target_acquisition() -> None:
+    layout, write_index = SharedRingBuffer.create((480, 640, 3), num_slots=2)
+    proc = OutputProcess(
+        layout=layout.layout,
+        write_index=write_index,
+        result_queue=mp.Queue(),
+        shutdown_event=mp.Event(),
+        error_queue=mp.Queue(),
+        mode="camera",
+        camera_config=CameraConfig(width=640, height=480),
+        comm_config=CommConfig(),
+        tracking_config=TrackingConfig(),
+        relay_config=RelayConfig(auto_fire_enabled=True),
+    )
+
+    first = decode_packet_v2(
+        proc._encode_packet(_msg(target_acquired=True, timestamp_ns=1_000_000_000), 0)
+    )
+    during = decode_packet_v2(
+        proc._encode_packet(_msg(target_acquired=True, timestamp_ns=1_099_000_000), 1)
+    )
+    after = decode_packet_v2(
+        proc._encode_packet(_msg(target_acquired=True, timestamp_ns=1_101_000_000), 2)
+    )
+
+    assert first is not None and first.state & FLAG_RELAY_ON
+    assert during is not None and during.state & FLAG_RELAY_ON
+    assert after is not None and not (after.state & FLAG_RELAY_ON)
+    layout.cleanup()
+
+
+@pytest.mark.unit
+def test_relay_auto_fire_rearms_after_target_is_lost() -> None:
+    layout, write_index = SharedRingBuffer.create((480, 640, 3), num_slots=2)
+    proc = OutputProcess(
+        layout=layout.layout,
+        write_index=write_index,
+        result_queue=mp.Queue(),
+        shutdown_event=mp.Event(),
+        error_queue=mp.Queue(),
+        mode="camera",
+        camera_config=CameraConfig(width=640, height=480),
+        comm_config=CommConfig(),
+        tracking_config=TrackingConfig(),
+        relay_config=RelayConfig(auto_fire_enabled=True),
+    )
+
+    first = decode_packet_v2(
+        proc._encode_packet(_msg(target_acquired=True, timestamp_ns=1_000_000_000), 0)
+    )
+    after = decode_packet_v2(
+        proc._encode_packet(_msg(target_acquired=True, timestamp_ns=1_101_000_000), 1)
+    )
+    lost = decode_packet_v2(
+        proc._encode_packet(_msg(target_acquired=False, timestamp_ns=1_200_000_000), 2)
+    )
+    reacquired = decode_packet_v2(
+        proc._encode_packet(_msg(target_acquired=True, timestamp_ns=1_300_000_000), 3)
+    )
+
+    assert first is not None and first.state & FLAG_RELAY_ON
+    assert after is not None and not (after.state & FLAG_RELAY_ON)
+    assert lost is not None and not (lost.state & FLAG_RELAY_ON)
+    assert reacquired is not None and reacquired.state & FLAG_RELAY_ON
+    layout.cleanup()
+
+
 # ── Confidence mapped to 0-255 ───────────────────────────────────
 
 
@@ -335,14 +424,26 @@ def test_latency_clamped(output_process: OutputProcess) -> None:
 
 @pytest.mark.unit
 def test_velocity_encoding(output_process: OutputProcess) -> None:
-    msg = _msg(
-        servo_angular_velocity=(math.radians(10.0), math.radians(-5.0)),
-        angular_velocity=None,
+    seed = _msg(
+        servo_angles=(0.0, 0.0),
+        servo_angular_velocity=(0.0, 0.0),
+        timestamp_ns=1_000_000_000,
+        fps=10.0,
     )
-    decoded = decode_packet_v2(output_process._encode_packet(msg, 0))
-    # 10 deg/s → 1000 centideg/s
+    first = decode_packet_v2(output_process._encode_packet(seed, 0))
+    assert first.pan_vel == 0
+    assert first.tilt_vel == 0
+
+    msg = _msg(
+        servo_angles=(math.radians(10.0), math.radians(-5.0)),
+        servo_angular_velocity=(math.radians(500.0), math.radians(-500.0)),
+        angular_velocity=None,
+        timestamp_ns=1_100_000_000,
+        fps=10.0,
+    )
+    decoded = decode_packet_v2(output_process._encode_packet(msg, 1))
     assert abs(decoded.pan_vel - 1000) <= 1
-    assert abs(decoded.tilt_vel - (-500)) <= 1
+    assert abs(decoded.tilt_vel - (-225)) <= 1
 
 
 # ── Camera-on-gimbal PI controller ───────────────────────────────

@@ -5,7 +5,6 @@ import multiprocessing as mp
 import threading
 import time
 from dataclasses import replace
-from math import degrees
 from multiprocessing.sharedctypes import Synchronized
 from queue import Empty
 from traceback import format_exc
@@ -15,6 +14,7 @@ from src.config import (
     CommConfig,
     GimbalConfig,
     Mode,
+    RelayConfig,
     RuntimeFlags,
     SearchConfig,
     ServoControlConfig,
@@ -25,16 +25,19 @@ from src.output.auto_controller import (
     AutoControllerState,
     compute_auto_command,
 )
+from src.output.command_smoother import BacklashCompensator, CommandSlewLimiter
 from src.output.diagnostics import draw_diagnostics, get_transport_status
 from src.output.manual_control import (
     ManualVelocityTracker,
     boost_manual_velocity,
 )
 from src.output.manual_loop import ManualLoopConfig, run_manual_tick_loop
+from src.output.relock_diagnostics import RelockDiagnostics
 from src.output.sender_factory import create_sender
 from src.output.telemetry import write_metrics_summary
 from src.output.visualizer import FrameSmoother, draw_overlay
 from src.shared.display_buffer import DisplayBufferLayout, SharedDisplayBuffer
+from src.shared.logging_config import configure_process_logging
 from src.shared.profiler import StageProfiler
 from src.shared.protocol import (
     FLAG_LASER_ON,
@@ -47,6 +50,7 @@ from src.shared.ring_buffer import RingBufferLayout, SharedRingBuffer
 from src.shared.runtime_control import OutputRuntimeTuning
 from src.shared.telemetry import RuntimeTelemetry, put_latest
 from src.shared.types import ProcessErrorReport, TrackingMessage
+from src.shared.windows_timer import WindowsTimerResolution
 
 LOGGER = logging.getLogger("output")
 
@@ -73,6 +77,7 @@ class OutputProcess(mp.Process):
         control_queue: mp.Queue | None = None,
         control_ack_version: Synchronized | None = None,
         relay_flag: Synchronized | None = None,
+        relay_config: RelayConfig | None = None,
         laser_enabled: Synchronized | None = None,
         manual_mode: Synchronized | None = None,
         manual_pan: Synchronized | None = None,
@@ -92,6 +97,7 @@ class OutputProcess(mp.Process):
         self._control_queue = control_queue
         self._control_ack_version = control_ack_version
         self._relay_flag = relay_flag
+        self._relay_config = relay_config or RelayConfig()
         self._laser_enabled = laser_enabled
         self._manual_mode = manual_mode
         self._manual_pan = manual_pan
@@ -118,6 +124,19 @@ class OutputProcess(mp.Process):
         )
         # Manual-mode velocity history is owned by ManualVelocityTracker.
         self._manual_velocity_tracker = ManualVelocityTracker()
+        self._manual_command_limiter = CommandSlewLimiter()
+        self._manual_command_limiter_timestamp_ns: int | None = None
+        self._auto_output_command_limiter = CommandSlewLimiter()
+        self._backlash_compensator = BacklashCompensator()
+        self._last_auto_output_pan_deg: float | None = None
+        self._last_auto_output_tilt_deg: float | None = None
+        self._last_auto_output_timestamp_ns: int | None = None
+        self._auto_relay_until_ns = 0
+        self._auto_fire_previous_target_acquired = False
+        self._relock_diagnostics = RelockDiagnostics(
+            logger=LOGGER,
+            micro_loss_window_s=self._servo_control_config.micro_relock_window_s,
+        )
 
     # --- Backward-compat properties for existing tests that reach into
     # the per-frame controller state. New code should use
@@ -189,6 +208,20 @@ class OutputProcess(mp.Process):
     def _is_laser_enabled(self) -> bool:
         return self._laser_enabled is None or bool(self._laser_enabled.value)
 
+    def _is_auto_relay_active(self, message: TrackingMessage) -> bool:
+        if not self._relay_config.auto_fire_enabled:
+            self._auto_fire_previous_target_acquired = message.target_acquired
+            return False
+
+        if message.target_acquired and not self._auto_fire_previous_target_acquired:
+            pulse_ns = self._relay_config.auto_fire_pulse_ms * 1_000_000
+            self._auto_relay_until_ns = max(
+                self._auto_relay_until_ns,
+                message.timestamp_ns + pulse_ns,
+            )
+        self._auto_fire_previous_target_acquired = message.target_acquired
+        return message.timestamp_ns < self._auto_relay_until_ns
+
     def _boost_manual_velocity(self, velocity_dps: float) -> float:
         # Thin wrapper around src.output.manual_control.boost_manual_velocity;
         # keeps existing call sites unchanged.
@@ -217,19 +250,20 @@ class OutputProcess(mp.Process):
                 self._manual_sequence = (seq + 1) & 0xFFFF
             return seq
 
-        run_manual_tick_loop(
-            sender=sender,
-            shutdown_event=shutdown_event,
-            manual_mode=self._manual_mode,
-            manual_pan=self._manual_pan,
-            manual_tilt=self._manual_tilt,
-            relay_flag=self._relay_flag,
-            laser_enabled=self._laser_enabled,
-            loop_config=ManualLoopConfig.from_configs(
-                self._gimbal_config, self._servo_control_config
-            ),
-            get_next_sequence=_get_next_sequence,
-        )
+        with WindowsTimerResolution(period_ms=1):
+            run_manual_tick_loop(
+                sender=sender,
+                shutdown_event=shutdown_event,
+                manual_mode=self._manual_mode,
+                manual_pan=self._manual_pan,
+                manual_tilt=self._manual_tilt,
+                relay_flag=self._relay_flag,
+                laser_enabled=self._laser_enabled,
+                loop_config=ManualLoopConfig.from_configs(
+                    self._gimbal_config, self._servo_control_config
+                ),
+                get_next_sequence=_get_next_sequence,
+            )
 
     def run(self) -> None:
         import sys
@@ -243,10 +277,7 @@ class OutputProcess(mp.Process):
             )
 
         sys.excepthook = _excepthook
-        logging.basicConfig(
-            level=logging.INFO,
-            format="%(asctime)s %(processName)s %(levelname)s %(message)s",
-        )
+        configure_process_logging()
         sender = (
             self._create_sender() if self._mode == "camera" and self._comm_config.enabled else None
         )
@@ -290,8 +321,10 @@ class OutputProcess(mp.Process):
         _diag_latency_max = 0.0
         _last_telemetry_time = 0.0
         _TELEMETRY_INTERVAL_S = 1.0 / 20.0
+        timer_resolution = WindowsTimerResolution(period_ms=1)
 
         try:
+            timer_resolution.__enter__()
             while not self._shutdown_event.is_set():
                 self._drain_runtime_controls()
                 try:
@@ -440,6 +473,8 @@ class OutputProcess(mp.Process):
                             total_frames=_diag_total_frames,
                             display_drops=_display_drops,
                             display_total=_display_total,
+                            capture_age_ms=outbound.capture_age_ms,
+                            skipped_frames=outbound.skipped_frames,
                         ),
                     )
                     _last_telemetry_time = now
@@ -448,12 +483,20 @@ class OutputProcess(mp.Process):
             self._report_error(exc)
             self._shutdown_event.set()
         finally:
-            self._write_metrics_summary(profiler, sender, run_start, _display_drops, _display_total)
-            if sender is not None:
-                sender.close()
-            if display_buffer is not None:
-                display_buffer.close()
-            ring_buffer.close()
+            try:
+                self._shutdown_event.set()
+                if manual_thread.is_alive():
+                    manual_thread.join(timeout=1.0)
+                self._write_metrics_summary(
+                    profiler, sender, run_start, _display_drops, _display_total
+                )
+                if sender is not None:
+                    sender.close()
+                if display_buffer is not None:
+                    display_buffer.close()
+                ring_buffer.close()
+            finally:
+                timer_resolution.__exit__(None, None, None)
 
     def _write_metrics_summary(
         self,
@@ -475,6 +518,70 @@ class OutputProcess(mp.Process):
 
     def _reset_manual_command_history(self) -> None:
         self._manual_velocity_tracker.reset()
+        self._manual_command_limiter.reset()
+        self._manual_command_limiter_timestamp_ns = None
+
+    def _reset_auto_output_history(self) -> None:
+        self._auto_output_command_limiter.reset()
+        self._backlash_compensator.reset()
+        self._last_auto_output_pan_deg = None
+        self._last_auto_output_tilt_deg = None
+        self._last_auto_output_timestamp_ns = None
+
+    def _auto_output_dt_s(self, message: TrackingMessage) -> float:
+        fallback = 1.0 / max(message.fps, 1.0) if message.fps > 0 else 1.0 / 60.0
+        if (
+            self._last_auto_output_timestamp_ns is None
+            or message.timestamp_ns <= self._last_auto_output_timestamp_ns
+        ):
+            return fallback
+        return min((message.timestamp_ns - self._last_auto_output_timestamp_ns) / 1e9, 0.1)
+
+    def _limit_and_measure_auto_output_command(
+        self,
+        pan_deg: float,
+        tilt_deg: float,
+        message: TrackingMessage,
+    ) -> tuple[float, float, float, float]:
+        if message.state_source == "center":
+            self._reset_auto_output_history()
+
+        dt_s = self._auto_output_dt_s(message)
+        pan_deg, tilt_deg = self._backlash_compensator.compensate(
+            pan_deg,
+            tilt_deg,
+            dt_s=dt_s,
+            enabled=self._servo_control_config.backlash_compensation_enabled,
+            pan_deg_amount=self._servo_control_config.backlash_pan_deg,
+            tilt_deg_amount=self._servo_control_config.backlash_tilt_deg,
+            min_step_deg=self._servo_control_config.backlash_min_step_deg,
+            pulse_decay_dps=self._servo_control_config.backlash_pulse_decay_dps,
+        )
+        pan_deg, tilt_deg = self._auto_output_command_limiter.limit(
+            pan_deg,
+            tilt_deg,
+            dt_s=dt_s,
+            limit_dps=self._servo_control_config.auto_command_slew_limit_dps,
+        )
+
+        if (
+            self._last_auto_output_timestamp_ns is None
+            or self._last_auto_output_pan_deg is None
+            or self._last_auto_output_tilt_deg is None
+            or message.timestamp_ns <= self._last_auto_output_timestamp_ns
+        ):
+            pan_vel_dps = 0.0
+            tilt_vel_dps = 0.0
+        else:
+            pan_vel_dps = (pan_deg - self._last_auto_output_pan_deg) / dt_s if dt_s > 0 else 0.0
+            tilt_vel_dps = (
+                (tilt_deg - self._last_auto_output_tilt_deg) / dt_s if dt_s > 0 else 0.0
+            )
+
+        self._last_auto_output_pan_deg = pan_deg
+        self._last_auto_output_tilt_deg = tilt_deg
+        self._last_auto_output_timestamp_ns = message.timestamp_ns
+        return pan_deg, tilt_deg, pan_vel_dps, tilt_vel_dps
 
     def _record_auto_command(
         self,
@@ -519,7 +626,9 @@ class OutputProcess(mp.Process):
             if message.hold_time_s is not None
             else self._tracking_config.hold_time_s
         )
-        if hold_elapsed_s <= hold_time and message.filtered_angles is not None:
+        if message.filtered_angles is not None and (
+            hold_elapsed_s <= hold_time or self._search_config.enabled
+        ):
             return message
         return self._center_message(message)
 
@@ -560,6 +669,23 @@ class OutputProcess(mp.Process):
 
             pan_deg = manual_pan_deg * pan_sign
             tilt_deg = manual_tilt_deg * tilt_sign
+            if self._manual_command_limiter_timestamp_ns is None:
+                manual_dt_s = 1.0 / max(message.fps, 1.0) if message.fps > 0 else 0.01
+            else:
+                manual_dt_s = min(
+                    max(
+                        (message.timestamp_ns - self._manual_command_limiter_timestamp_ns) / 1e9,
+                        0.0,
+                    ),
+                    0.1,
+                )
+            self._manual_command_limiter_timestamp_ns = message.timestamp_ns
+            pan_deg, tilt_deg = self._manual_command_limiter.limit(
+                pan_deg,
+                tilt_deg,
+                dt_s=manual_dt_s,
+                limit_dps=self._servo_control_config.manual_command_slew_limit_dps,
+            )
             pan_vel_dps, tilt_vel_dps = self._compute_manual_velocity_dps(
                 pan_deg,
                 tilt_deg,
@@ -568,6 +694,7 @@ class OutputProcess(mp.Process):
             pan_vel_dps = self._boost_manual_velocity(pan_vel_dps)
             tilt_vel_dps = self._boost_manual_velocity(tilt_vel_dps)
             self._auto_controller_state.reset()
+            self._reset_auto_output_history()
             confidence_value = 0.0
             vel_mag_dps = (pan_vel_dps * pan_vel_dps + tilt_vel_dps * tilt_vel_dps) ** 0.5
             state = build_state_flags(
@@ -598,6 +725,11 @@ class OutputProcess(mp.Process):
         pan_deg = max(-pan_lim, min(pan_lim, pan_deg))
         tilt_deg = max(-tilt_lim, min(tilt_lim, tilt_deg))
         if not is_manual:
+            pan_deg, tilt_deg, pan_vel_dps, tilt_vel_dps = (
+                self._limit_and_measure_auto_output_command(pan_deg, tilt_deg, message)
+            )
+            pan_deg = max(-pan_lim, min(pan_lim, pan_deg))
+            tilt_deg = max(-tilt_lim, min(tilt_lim, tilt_deg))
             self._record_auto_command(pan_deg, tilt_deg, pan_sign, tilt_sign)
 
         pan_centideg = int(round(pan_deg * 100.0))
@@ -607,14 +739,6 @@ class OutputProcess(mp.Process):
         )
 
         if not is_manual:
-            # Angular velocity → centideg/sec (with sign inversion) — use servo velocity (no EMA)
-            if self._auto_controller_state.search_active and not message.target_acquired:
-                pan_vel_dps = self._auto_controller_state.search_pan_velocity_dps
-                tilt_vel_dps = self._auto_controller_state.search_tilt_velocity_dps
-            else:
-                ang_vel = message.servo_angular_velocity or message.angular_velocity or (0.0, 0.0)
-                pan_vel_dps = degrees(ang_vel[0]) * pan_sign
-                tilt_vel_dps = degrees(ang_vel[1]) * tilt_sign
             pan_vel_cdps = int(round(pan_vel_dps * 100.0))
             tilt_vel_cdps = int(round(tilt_vel_dps * 100.0))
 
@@ -629,8 +753,17 @@ class OutputProcess(mp.Process):
             quality = confidence
         if laser_enabled and (is_manual or message.target_acquired):
             state |= FLAG_LASER_ON
-        if self._relay_flag is not None and self._relay_flag.value:
+        manual_relay_active = self._relay_flag is not None and self._relay_flag.value
+        auto_relay_active = not is_manual and self._is_auto_relay_active(message)
+        if manual_relay_active or auto_relay_active:
             state |= FLAG_RELAY_ON
+        if not is_manual:
+            self._relock_diagnostics.observe(
+                message,
+                command_deg=(pan_deg, tilt_deg),
+                velocity_dps=(pan_vel_dps, tilt_vel_dps),
+                state_flags=state,
+            )
         latency = int(min(255, max(0, round(message.total_latency_ms))))
 
         return encode_packet_v2(

@@ -18,6 +18,7 @@ import pytest
 
 from src.config import GimbalConfig, ServoControlConfig
 from src.output.manual_loop import ManualLoopConfig, run_manual_tick_loop
+from src.shared.protocol import decode_packet_v2
 
 
 def _make_config(
@@ -27,6 +28,7 @@ def _make_config(
     pan_limit_deg: float = 90.0,
     tilt_limit_deg: float = 90.0,
     velocity_floor_dps: float = 80.0,
+    command_slew_limit_dps: float = 0.0,
     tick_s: float = 0.005,
 ) -> ManualLoopConfig:
     return ManualLoopConfig.from_configs(
@@ -37,7 +39,8 @@ def _make_config(
             tilt_limit_deg=tilt_limit_deg,
         ),
         servo_control_config=ServoControlConfig(
-            manual_response_velocity_floor_dps=velocity_floor_dps
+            manual_response_velocity_floor_dps=velocity_floor_dps,
+            manual_command_slew_limit_dps=command_slew_limit_dps,
         ),
         tick_s=tick_s,
     )
@@ -54,6 +57,20 @@ def _sequence_counter() -> tuple[Any, list[int]]:
         return seq
 
     return _get, emitted
+
+
+class _StoppingSender:
+    is_connected = True
+
+    def __init__(self, stop_after: int, stop_event: threading.Event) -> None:
+        self.stop_after = stop_after
+        self.stop_event = stop_event
+        self.sent_packets: list[bytes] = []
+
+    def send(self, packet: bytes) -> None:
+        self.sent_packets.append(packet)
+        if len(self.sent_packets) >= self.stop_after:
+            self.stop_event.set()
 
 
 @pytest.mark.unit
@@ -244,3 +261,137 @@ def test_manual_loop_config_from_configs_preserves_defaults() -> None:
     assert cfg.pan_limit_deg == 90.0
     assert cfg.tilt_limit_deg == 90.0
     assert cfg.velocity_floor_dps == 80.0
+    assert cfg.command_slew_limit_dps == 0.0
+
+
+@pytest.mark.unit
+def test_manual_loop_slew_limits_sudden_command_step() -> None:
+    now = 0.0
+    stop = threading.Event()
+    manual_mode = mp.Value("b", 1)
+    manual_pan = mp.Value("d", 0.0)
+    manual_tilt = mp.Value("d", 0.0)
+
+    def fake_monotonic() -> float:
+        return now
+
+    def fake_sleep(seconds: float) -> None:
+        nonlocal now
+        now += seconds
+
+    class StepSender(_StoppingSender):
+        def send(self, packet: bytes) -> None:
+            super().send(packet)
+            if len(self.sent_packets) == 1:
+                manual_pan.value = 90.0
+
+    sender = StepSender(stop_after=3, stop_event=stop)
+    get_seq, _ = _sequence_counter()
+
+    run_manual_tick_loop(
+        sender=sender,
+        shutdown_event=stop,
+        manual_mode=manual_mode,
+        manual_pan=manual_pan,
+        manual_tilt=manual_tilt,
+        relay_flag=mp.Value("b", 0),
+        laser_enabled=mp.Value("b", 1),
+        loop_config=_make_config(
+            tick_s=0.01,
+            command_slew_limit_dps=100.0,
+            velocity_floor_dps=0.0,
+        ),
+        get_next_sequence=get_seq,
+        monotonic=fake_monotonic,
+        sleep=fake_sleep,
+    )
+
+    decoded = [decode_packet_v2(packet) for packet in sender.sent_packets]
+
+    assert [packet.pan for packet in decoded] == [0, 100, 200]
+
+
+@pytest.mark.unit
+def test_manual_loop_uses_deadline_sleep_when_manual_active() -> None:
+    sleep_calls: list[float] = []
+    now = 0.0
+
+    def fake_monotonic() -> float:
+        return now
+
+    def fake_sleep(seconds: float) -> None:
+        nonlocal now
+        sleep_calls.append(seconds)
+        now += seconds
+
+    cfg = _make_config(tick_s=0.01)
+    stop = threading.Event()
+    manual_mode = mp.Value("b", 1)
+    manual_pan = mp.Value("d", 1.0)
+    manual_tilt = mp.Value("d", 0.0)
+    sender = _StoppingSender(stop_after=3, stop_event=stop)
+    get_seq, emitted = _sequence_counter()
+
+    run_manual_tick_loop(
+        sender=sender,
+        shutdown_event=stop,
+        manual_mode=manual_mode,
+        manual_pan=manual_pan,
+        manual_tilt=manual_tilt,
+        relay_flag=mp.Value("b", 0),
+        laser_enabled=mp.Value("b", 1),
+        loop_config=cfg,
+        get_next_sequence=get_seq,
+        monotonic=fake_monotonic,
+        sleep=fake_sleep,
+    )
+
+    assert len(sender.sent_packets) == 3
+    assert emitted == [0, 1, 2]
+    assert sleep_calls
+    assert all(0.0 <= seconds <= cfg.tick_s for seconds in sleep_calls)
+
+
+@pytest.mark.unit
+def test_manual_loop_drops_missed_deadlines_after_overrun() -> None:
+    """An overrun should not create zero-sleep catch-up bursts."""
+    sleep_calls: list[float] = []
+    now = 0.0
+
+    def fake_monotonic() -> float:
+        return now
+
+    def fake_sleep(seconds: float) -> None:
+        nonlocal now
+        sleep_calls.append(seconds)
+        now += seconds
+
+    cfg = _make_config(tick_s=0.01)
+    stop = threading.Event()
+
+    class OverrunSender(_StoppingSender):
+        def send(self, packet: bytes) -> None:
+            nonlocal now
+            now += cfg.tick_s * 4.0
+            super().send(packet)
+
+    sender = OverrunSender(stop_after=3, stop_event=stop)
+    get_seq, _ = _sequence_counter()
+
+    run_manual_tick_loop(
+        sender=sender,
+        shutdown_event=stop,
+        manual_mode=mp.Value("b", 1),
+        manual_pan=mp.Value("d", 1.0),
+        manual_tilt=mp.Value("d", 0.0),
+        relay_flag=mp.Value("b", 0),
+        laser_enabled=mp.Value("b", 1),
+        loop_config=cfg,
+        get_next_sequence=get_seq,
+        monotonic=fake_monotonic,
+        sleep=fake_sleep,
+    )
+
+    assert len(sender.sent_packets) == 3
+    assert sleep_calls
+    assert all(seconds == pytest.approx(cfg.tick_s) for seconds in sleep_calls)

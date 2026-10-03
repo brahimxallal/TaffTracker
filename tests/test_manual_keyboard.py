@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import pytest
 
+from src.config import ServoControlConfig
 from src.ui.manual_keyboard import (
     ARROW_DOWN,
     ARROW_LEFT,
@@ -332,3 +333,18 @@ def test_movement_threshold_clamps_residual_velocity_to_zero() -> None:
         )
 
     assert driver.velocity_pan_dps == 0.0
+
+
+@pytest.mark.unit
+def test_config_from_servo_control_uses_runtime_manual_speed_knobs() -> None:
+    cfg = ManualKeyboardConfig.from_servo_control(
+        ServoControlConfig(
+            manual_fine_speed_dps=220.0,
+            manual_coarse_speed_dps=520.0,
+            manual_accel_time_s=0.025,
+        )
+    )
+
+    assert cfg.fine_speed_dps == pytest.approx(220.0)
+    assert cfg.coarse_speed_dps == pytest.approx(520.0)
+    assert cfg.accel_time_s == pytest.approx(0.025)

@@ -21,6 +21,8 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from src.config import ServoControlConfig
+
 # OpenCV waitKeyEx return values for the arrow keys (Windows + most Linux).
 ARROW_LEFT = 0x250000
 ARROW_UP = 0x260000
@@ -37,6 +39,14 @@ class ManualKeyboardConfig:
     accel_time_s: float = 0.05
     decel_multiplier: float = 3.0
     movement_threshold_dps: float = 0.05
+
+    @classmethod
+    def from_servo_control(cls, config: ServoControlConfig) -> ManualKeyboardConfig:
+        return cls(
+            fine_speed_dps=config.manual_fine_speed_dps,
+            coarse_speed_dps=config.manual_coarse_speed_dps,
+            accel_time_s=config.manual_accel_time_s,
+        )
 
 
 class ManualKeyboardDriver:
