@@ -265,7 +265,11 @@ class PhoneYuvCaptureSource:
             ):
                 return False, None
             self._last_delivered_sequence = header.sequence
-            self._last_header = header
+            # ``_last_header`` is deliberately NOT written here: in background mode the reader
+            # thread is its only writer. Writing it from this (consumer) thread could overwrite
+            # the header of a frame the reader has just decoded, and the reader would then
+            # publish that frame paired with a stale header (and the frame would be dropped as a
+            # duplicate sequence).
             return True, frame
 
     def _start_background_reader(self) -> None:

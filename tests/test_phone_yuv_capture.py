@@ -335,3 +335,30 @@ def test_non_loopback_listener_requires_explicit_opt_in() -> None:
                 control_port=0,
             )
         )
+
+
+@pytest.mark.unit
+def test_background_read_does_not_overwrite_header_written_by_reader(monkeypatch):
+    """The reader thread is the only writer of ``last_header`` in background mode.
+
+    If the consumer wrote it too, it could replace the header of a frame the reader has just
+    decoded with the (older) header of the frame being handed out, and the reader would then
+    publish the new frame under a stale sequence number.
+    """
+    source = PhoneYuvCaptureSource(
+        PhoneCameraRuntimeConfig(background_reader=True),
+        start_listening=False,
+    )
+    monkeypatch.setattr(source, "_ensure_frame_socket", lambda: True)
+    delivered_header = _header(sequence=1)
+    newer_header = _header(sequence=2)
+    delivered_frame = np.zeros((2, 2, 3), dtype=np.uint8)
+    source._latest_header = delivered_header
+    source._latest_frame = delivered_frame
+    source._last_header = newer_header  # the reader has already decoded the next frame
+
+    ok, frame = source.read()
+
+    assert ok is True
+    assert frame is delivered_frame
+    assert source.last_header is newer_header
