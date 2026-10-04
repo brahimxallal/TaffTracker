@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import multiprocessing as mp
 import threading
 import time
@@ -35,6 +36,7 @@ from src.output.manual_loop import ManualLoopConfig, run_manual_tick_loop
 from src.output.relock_diagnostics import RelockDiagnostics
 from src.output.sender_factory import create_sender
 from src.output.telemetry import write_metrics_summary
+from src.output.tracking_error import TrackingErrorStats
 from src.output.visualizer import FrameSmoother, draw_overlay
 from src.shared.display_buffer import DisplayBufferLayout, SharedDisplayBuffer
 from src.shared.logging_config import configure_process_logging
@@ -289,6 +291,7 @@ class OutputProcess(mp.Process):
             display_buffer is not None or self._display_queue is not None
         )
         profiler = StageProfiler(window_size=256, enabled=self._flags.profile)
+        tracking_error = TrackingErrorStats()
         _frame_smoother = FrameSmoother()
         run_start = time.perf_counter()
 
@@ -338,6 +341,7 @@ class OutputProcess(mp.Process):
                 outbound = self._apply_fail_safe(message, last_valid_message)
                 if outbound.target_acquired:
                     last_valid_message = outbound
+                    self._observe_tracking_error(tracking_error, outbound)
 
                 # Diagnostic accumulators
                 _diag_total_frames += 1
@@ -437,6 +441,15 @@ class OutputProcess(mp.Process):
                         _display_total,
                         drop_pct,
                     )
+                    interval_error = tracking_error.flush_interval()
+                    if interval_error is not None:
+                        LOGGER.info(
+                            "Tracking error while locked: p50 %.1f deg | p95 %.1f deg | max %.1f deg (n=%d)",
+                            interval_error.p50_deg,
+                            interval_error.p95_deg,
+                            interval_error.max_deg,
+                            interval_error.count,
+                        )
                     self._frames_processed = 0
                     self._last_log_time = current_time
                     _display_drops = 0
@@ -488,7 +501,12 @@ class OutputProcess(mp.Process):
                 if manual_thread.is_alive():
                     manual_thread.join(timeout=1.0)
                 self._write_metrics_summary(
-                    profiler, sender, run_start, _display_drops, _display_total
+                    profiler,
+                    sender,
+                    run_start,
+                    _display_drops,
+                    _display_total,
+                    tracking_error,
                 )
                 if sender is not None:
                     sender.close()
@@ -505,6 +523,7 @@ class OutputProcess(mp.Process):
         run_start: float,
         display_drops: int,
         display_total: int,
+        tracking_error: TrackingErrorStats | None = None,
     ) -> None:
         # Thin wrapper around src.output.telemetry.write_metrics_summary.
         # Kept as an instance method so existing call sites stay unchanged.
@@ -514,7 +533,23 @@ class OutputProcess(mp.Process):
             run_start,
             display_drops,
             display_total,
+            tracking_error=tracking_error,
         )
+
+    def _observe_tracking_error(self, stats: TrackingErrorStats, message: TrackingMessage) -> None:
+        """Record the aiming error of frames steered from a fresh detection.
+
+        Planned Kalman-only frames and manual mode carry no measurement of how far
+        the gimbal is from the target, so they are skipped.
+        """
+        if message.state_source != "measurement":
+            return
+        if self._manual_mode is not None and bool(self._manual_mode.value):
+            return
+        angles = message.servo_angles or message.filtered_angles
+        if angles is None:
+            return
+        stats.observe(math.degrees(math.hypot(angles[0], angles[1])))
 
     def _reset_manual_command_history(self) -> None:
         self._manual_velocity_tracker.reset()

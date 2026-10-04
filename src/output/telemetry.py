@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from src.output.tracking_error import TrackingErrorStats
 from src.shared.profiler import StageProfiler
 
 
@@ -23,11 +24,13 @@ def write_metrics_summary(
     display_total: int,
     *,
     log_dir: Path = Path("logs"),
+    tracking_error: TrackingErrorStats | None = None,
 ) -> None:
     """Persist a JSON summary of the output-process run to ``logs/output_metrics.json``.
 
-    Captures packet counters, packet-send latency percentiles, and display
-    drop rate. Called once during graceful shutdown; never on the hot path.
+    Captures packet counters, packet-send latency percentiles, display drop
+    rate and, when given, the whole-run aiming-error percentiles measured while
+    locked. Called once during graceful shutdown; never on the hot path.
     """
     log_dir.mkdir(parents=True, exist_ok=True)
     metrics_path = log_dir / "output_metrics.json"
@@ -35,6 +38,7 @@ def write_metrics_summary(
     duration_s = max(time.perf_counter() - run_start, 1e-6)
     packets_sent = int(getattr(sender, "packets_sent", 0)) if sender is not None else 0
     packets_failed = int(getattr(sender, "packets_failed", 0)) if sender is not None else 0
+    error_summary = tracking_error.summary() if tracking_error is not None else None
     payload = {
         "duration_s": duration_s,
         "display_drops": display_drops,
@@ -57,5 +61,6 @@ def write_metrics_summary(
             if send_stats is not None
             else None
         ),
+        "tracking_error_deg": error_summary.as_dict() if error_summary is not None else None,
     }
     metrics_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
