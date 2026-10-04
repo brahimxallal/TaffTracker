@@ -31,6 +31,11 @@ from math import degrees, sin
 
 from src.config import GimbalConfig, SearchConfig, ServoControlConfig
 from src.output.command_smoother import CommandSlewLimiter
+from src.output.latency_compensation import (
+    LatencyCompensationConfig,
+    LatencyCompensator,
+    compensate_error,
+)
 from src.output.velocity_smoother import VelocitySmoother, VelocitySmootherConfig
 from src.shared.types import TrackingMessage
 
@@ -65,6 +70,7 @@ class AutoControllerConfig:
     micro_relock_gain: float
     micro_relock_ramp_frames: int
     search: SearchConfig
+    latency: LatencyCompensationConfig = field(default_factory=LatencyCompensationConfig)
 
     @classmethod
     def from_configs(
@@ -101,6 +107,14 @@ class AutoControllerConfig:
             micro_relock_gain=servo_control_config.micro_relock_gain,
             micro_relock_ramp_frames=servo_control_config.micro_relock_ramp_frames,
             search=search_config or SearchConfig(),
+            latency=LatencyCompensationConfig(
+                delay_s=servo_control_config.latency_comp_delay_s,
+                smith_gain=servo_control_config.latency_comp_smith_gain,
+                velocity_ff_gain=servo_control_config.latency_comp_velocity_ff_gain,
+                velocity_tau_s=servo_control_config.latency_comp_velocity_tau_s,
+                velocity_deadband_dps=servo_control_config.latency_comp_velocity_deadband_dps,
+                velocity_max_dps=servo_control_config.latency_comp_velocity_max_dps,
+            ),
         )
 
 
@@ -139,6 +153,7 @@ class AutoControllerState:
     lost_started_timestamp_ns: int | None = None
     micro_relock_frames_remaining: int = 0
     micro_relock_total_frames: int = 0
+    latency: LatencyCompensator = field(default_factory=LatencyCompensator)
 
     def reset(self) -> None:
         """Zero all integrators + derivative history."""
@@ -158,6 +173,7 @@ class AutoControllerState:
         self.lost_started_timestamp_ns = None
         self.micro_relock_frames_remaining = 0
         self.micro_relock_total_frames = 0
+        self.latency.reset()
         self.clear_search_memory()
 
     def clear_search_memory(self) -> None:
@@ -226,6 +242,10 @@ def _compute_lead_error_deg(
     )
     speed_dps = (pan_vel_dps**2 + tilt_vel_dps**2) ** 0.5
     lead = config.predictive_lead_s if speed_dps > 30.0 else 0.0
+    if config.latency.enabled:
+        # Relative (camera-frame) velocity cannot lead a target the camera is
+        # already following; delay compensation supplies an absolute-velocity lead.
+        lead = 0.0
     pan_err_deg = (degrees(angles_rad[0]) + pan_vel_dps * lead) * config.pan_sign
     tilt_err_deg = (degrees(angles_rad[1]) + tilt_vel_dps * lead) * config.tilt_sign
     return pan_err_deg, tilt_err_deg
@@ -315,25 +335,42 @@ def _track_error_command(
     pan_err_deg: float,
     tilt_err_deg: float,
     dt: float,
+    ff_dps: tuple[float, float] | None = None,
 ) -> tuple[float, float]:
-    """Run the controller for one tick when the target is acquired."""
+    """Run the controller for one tick when the target is acquired.
+
+    ``ff_dps`` is the absolute-velocity feedforward from latency compensation
+    (deg/s, controller frame). When given it replaces the legacy relative-velocity
+    feedforward and, unlike it, keeps acting inside the position deadband and
+    outside the distance-scaled slew cap — otherwise the deadband would switch the
+    feedforward off exactly when tracking is good and the cap would clip it.
+    """
     pan_abs = abs(pan_err_deg)
     tilt_abs = abs(tilt_err_deg)
     kp_pan = _gain_scheduled_kp(pan_abs, config)
     kp_tilt = _gain_scheduled_kp(tilt_abs, config)
 
-    # Velocity feedforward (sign-corrected to controller frame).
-    ang_vel = message.servo_angular_velocity or message.angular_velocity or (0.0, 0.0)
-    ff_pan = config.velocity_feedforward_gain * degrees(ang_vel[0]) * config.pan_sign
-    ff_tilt = config.velocity_feedforward_gain * degrees(ang_vel[1]) * config.tilt_sign
+    extra_ff_pan = 0.0
+    extra_ff_tilt = 0.0
+    if ff_dps is None:
+        # Legacy velocity feedforward (sign-corrected to controller frame).
+        ang_vel = message.servo_angular_velocity or message.angular_velocity or (0.0, 0.0)
+        ff_pan = config.velocity_feedforward_gain * degrees(ang_vel[0]) * config.pan_sign
+        ff_tilt = config.velocity_feedforward_gain * degrees(ang_vel[1]) * config.tilt_sign
 
-    # Approach rate (°/s) + feedforward, zero inside deadband.
-    rate_pan = (kp_pan * pan_err_deg + ff_pan) if pan_abs >= config.deadband_deg else 0.0
-    rate_tilt = (
-        (kp_tilt * config.tilt_scale * tilt_err_deg + ff_tilt)
-        if tilt_abs >= config.deadband_deg
-        else 0.0
-    )
+        # Approach rate (°/s) + feedforward, zero inside deadband.
+        rate_pan = (kp_pan * pan_err_deg + ff_pan) if pan_abs >= config.deadband_deg else 0.0
+        rate_tilt = (
+            (kp_tilt * config.tilt_scale * tilt_err_deg + ff_tilt)
+            if tilt_abs >= config.deadband_deg
+            else 0.0
+        )
+    else:
+        extra_ff_pan, extra_ff_tilt = ff_dps
+        rate_pan = kp_pan * pan_err_deg if pan_abs >= config.deadband_deg else 0.0
+        rate_tilt = (
+            kp_tilt * config.tilt_scale * tilt_err_deg if tilt_abs >= config.deadband_deg else 0.0
+        )
 
     # Derivative damping from LP-filtered error finite-difference.
     if dt > 0:
@@ -353,26 +390,44 @@ def _track_error_command(
     micro_relock_gain = _consume_micro_relock_gain(state, config)
     rate_pan *= micro_relock_gain
     rate_tilt *= micro_relock_gain
+    extra_ff_pan *= micro_relock_gain
+    extra_ff_tilt *= micro_relock_gain
 
     state.prev_err_pan = pan_err_deg
     state.prev_err_tilt = tilt_err_deg
 
-    # Distance-scaled slew limit.
+    # Distance-scaled slew limit on the feedback rate; the feedforward rides on
+    # top and the sum is bounded by the absolute slew limit (a no-op without
+    # feedforward, since the scaled cap never exceeds it).
     slew_pan = _slew_cap_dps(pan_abs, config)
     slew_tilt = _slew_cap_dps(tilt_abs, config)
-    rate_pan = max(-slew_pan, min(slew_pan, rate_pan))
-    rate_tilt = max(-slew_tilt, min(slew_tilt, rate_tilt))
+    rate_pan = max(-slew_pan, min(slew_pan, rate_pan)) + extra_ff_pan
+    rate_tilt = max(-slew_tilt, min(slew_tilt, rate_tilt)) + extra_ff_tilt
+    hard_limit = config.slew_limit_dps
+    rate_pan = max(-hard_limit, min(hard_limit, rate_pan))
+    rate_tilt = max(-hard_limit, min(hard_limit, rate_tilt))
 
     # Accumulate commanded position.
     state.pi_integral_pan += rate_pan * dt
     state.pi_integral_tilt += rate_tilt * dt
 
     # Integral decay inside the deadband: bleed the accumulator toward
-    # zero so a long quiescent period doesn't leave residual offset.
-    if pan_abs < config.deadband_deg and config.integral_decay_rate > 0 and dt > 0:
+    # zero so a long quiescent period doesn't leave residual offset. Skipped
+    # while a feedforward is moving the gimbal on purpose.
+    if (
+        pan_abs < config.deadband_deg
+        and config.integral_decay_rate > 0
+        and dt > 0
+        and extra_ff_pan == 0.0
+    ):
         decay = max(0.0, 1.0 - config.integral_decay_rate * dt)
         state.pi_integral_pan *= decay
-    if tilt_abs < config.deadband_deg and config.integral_decay_rate > 0 and dt > 0:
+    if (
+        tilt_abs < config.deadband_deg
+        and config.integral_decay_rate > 0
+        and dt > 0
+        and extra_ff_tilt == 0.0
+    ):
         decay = max(0.0, 1.0 - config.integral_decay_rate * dt)
         state.pi_integral_tilt *= decay
 
@@ -505,6 +560,23 @@ def compute_auto_command(
     state: AutoControllerState,
     config: AutoControllerConfig,
 ) -> tuple[float, float]:
+    """Single-tick auto-mode controller step (see :func:`_auto_command_step`).
+
+    Thin wrapper that records every issued command for delay compensation, so
+    the history also covers search sweeps, holds and re-centering.
+    """
+    command = _auto_command_step(message=message, state=state, config=config)
+    if config.latency.enabled:
+        state.latency.record_command(message.timestamp_ns / 1e9, command[0], command[1])
+    return command
+
+
+def _auto_command_step(
+    *,
+    message: TrackingMessage,
+    state: AutoControllerState,
+    config: AutoControllerConfig,
+) -> tuple[float, float]:
     """Single-tick auto-mode controller step.
 
     Returns ``(pan_deg, tilt_deg)`` — the commanded servo position in
@@ -542,7 +614,25 @@ def compute_auto_command(
             state.velocity_smoother_pan.reset()
             state.velocity_smoother_tilt.reset()
         state.stop_search()
-        command = _track_error_command(message, state, config, pan_err_deg, tilt_err_deg, dt)
+        track_pan_err_deg = pan_err_deg
+        track_tilt_err_deg = tilt_err_deg
+        ff_dps: tuple[float, float] | None = None
+        if config.latency.enabled:
+            compensated = compensate_error(
+                config=config.latency,
+                compensator=state.latency,
+                t_s=message.timestamp_ns / 1e9,
+                pan_err_deg=pan_err_deg,
+                tilt_err_deg=tilt_err_deg,
+                pipeline_age_s=message.total_latency_ms / 1e3,
+                fresh_measurement=message.state_source == "measurement",
+            )
+            track_pan_err_deg = compensated.pan_err_deg
+            track_tilt_err_deg = compensated.tilt_err_deg
+            ff_dps = (compensated.pan_ff_dps, compensated.tilt_ff_dps)
+        command = _track_error_command(
+            message, state, config, track_pan_err_deg, track_tilt_err_deg, dt, ff_dps=ff_dps
+        )
         command = _apply_command_slew_limit(
             command=command,
             state=state,

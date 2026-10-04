@@ -29,6 +29,7 @@ from src.config import (
     RuntimePaths,
     SearchConfig,
     ServoControlConfig,
+    TrackingConfig,
     adapt_tracking_for_fps,
     default_tracking_config,
 )
@@ -186,6 +187,30 @@ def _validate_config(config: PipelineConfig) -> None:
         )
     if config.tracking.low_confidence_grace_frames < 0:
         raise ValueError("Invalid tracking.low_confidence_grace_frames; expected >= 0")
+    if config.tracking.servo_input not in get_args(get_type_hints(TrackingConfig)["servo_input"]):
+        raise ValueError(
+            f"Invalid tracking.servo_input={config.tracking.servo_input!r}; "
+            f"expected one of {get_args(get_type_hints(TrackingConfig)['servo_input'])}"
+        )
+    servo = config.servo_control
+    if not 0.0 <= servo.latency_comp_delay_s <= 1.0:
+        raise ValueError("Invalid servo_control.latency_comp_delay_s; expected 0 <= value <= 1")
+    if not 0.0 <= servo.latency_comp_smith_gain <= 1.5:
+        raise ValueError(
+            "Invalid servo_control.latency_comp_smith_gain; expected 0 <= value <= 1.5"
+        )
+    if not 0.0 <= servo.latency_comp_velocity_ff_gain <= 1.5:
+        raise ValueError(
+            "Invalid servo_control.latency_comp_velocity_ff_gain; expected 0 <= value <= 1.5"
+        )
+    if not 0.0 < servo.latency_comp_velocity_tau_s <= 2.0:
+        raise ValueError(
+            "Invalid servo_control.latency_comp_velocity_tau_s; expected 0 < value <= 2"
+        )
+    if servo.latency_comp_velocity_deadband_dps < 0.0 or servo.latency_comp_velocity_max_dps <= 0.0:
+        raise ValueError(
+            "Invalid servo_control.latency_comp_velocity_*; expected deadband >= 0 and max > 0"
+        )
     if config.relay.pulse_ms < 0:
         raise ValueError("Invalid relay.pulse_ms; expected >= 0")
     if config.relay.auto_fire_pulse_ms < 1:
@@ -367,6 +392,7 @@ def build_config_from_yaml(
             "tracker_track_threshold",
             "tracker_birth_min_hits",
             "egomotion_compensation_enabled",
+            "servo_input",
         ):
             if key in trk_cfg:
                 tracking_overrides[key] = type(getattr(tracking, key))(trk_cfg[key])
