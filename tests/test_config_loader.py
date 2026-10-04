@@ -45,13 +45,87 @@ class TestConfigLoader:
         assert config.gimbal.predictive_lead_s == 0.035
         assert config.gimbal.slew_limit_dps == 125.0
         assert config.gimbal.deadband_deg == 0.65
-        assert config.gimbal.kp_far == 2.6
-        assert config.gimbal.kp_near == 1.0
+        assert config.gimbal.kp_far == 4.0
+        assert config.gimbal.kp_near == 2.5
+        assert config.gimbal.kd == 0.0
+        assert config.gimbal.tilt_scale == 0.6
         assert config.servo_control.auto_command_slew_limit_dps == 130.0
         assert config.servo_control.velocity_smoother_enabled is True
         assert config.servo_control.velocity_smoother_alpha == 0.45
         assert config.servo_control.velocity_smoother_deadband_dps == 6.0
         assert config.servo_control.velocity_smoother_slew_dps_per_s == 1800.0
+
+    def test_live_config_enables_delay_compensated_servo_path(self):
+        repo_config = Path(__file__).parents[1] / "config.yaml"
+        config = build_config_from_yaml(load_yaml_config(repo_config))
+
+        assert config.tracking.servo_input == "measurement"
+        servo = config.servo_control
+        assert servo.latency_comp_delay_s == 0.30
+        assert servo.latency_comp_smith_gain == 1.0
+        assert servo.latency_comp_velocity_ff_gain == 1.0
+        assert servo.latency_comp_velocity_tau_s == 0.18
+        assert servo.latency_comp_velocity_deadband_dps == 3.0
+        assert servo.latency_comp_velocity_max_dps == 150.0
+
+    def test_live_config_keeps_relay_auto_fire_disabled(self):
+        repo_config = Path(__file__).parents[1] / "config.yaml"
+        config = build_config_from_yaml(load_yaml_config(repo_config))
+
+        assert config.relay.auto_fire_enabled is False
+
+    def test_latency_compensation_is_off_by_default(self):
+        config = build_config_from_yaml({})
+
+        assert config.servo_control.latency_comp_delay_s == 0.0
+        assert config.tracking.servo_input == "kalman"
+
+    def test_latency_compensation_from_yaml(self):
+        yaml_data = {
+            "servo_control": {
+                "latency_comp_delay_s": 0.25,
+                "latency_comp_smith_gain": 0.9,
+                "latency_comp_velocity_ff_gain": 0.8,
+                "latency_comp_velocity_tau_s": 0.2,
+                "latency_comp_velocity_deadband_dps": 2.5,
+                "latency_comp_velocity_max_dps": 120.0,
+            },
+            "tracking": {"servo_input": "measurement"},
+        }
+
+        config = build_config_from_yaml(yaml_data)
+
+        servo = config.servo_control
+        assert servo.latency_comp_delay_s == 0.25
+        assert servo.latency_comp_smith_gain == 0.9
+        assert servo.latency_comp_velocity_ff_gain == 0.8
+        assert servo.latency_comp_velocity_tau_s == 0.2
+        assert servo.latency_comp_velocity_deadband_dps == 2.5
+        assert servo.latency_comp_velocity_max_dps == 120.0
+        assert config.tracking.servo_input == "measurement"
+
+    @pytest.mark.parametrize(
+        ("key", "value"),
+        [
+            ("latency_comp_delay_s", -0.01),
+            ("latency_comp_delay_s", 1.5),
+            ("latency_comp_smith_gain", -0.1),
+            ("latency_comp_smith_gain", 2.0),
+            ("latency_comp_velocity_ff_gain", -0.1),
+            ("latency_comp_velocity_ff_gain", 2.0),
+            ("latency_comp_velocity_tau_s", 0.0),
+            ("latency_comp_velocity_tau_s", 3.0),
+            ("latency_comp_velocity_deadband_dps", -1.0),
+            ("latency_comp_velocity_max_dps", 0.0),
+        ],
+    )
+    def test_invalid_latency_compensation_rejected(self, key: str, value: float):
+        with pytest.raises(ValueError, match="latency_comp"):
+            build_config_from_yaml({"servo_control": {key: value}})
+
+    def test_invalid_servo_input_rejected(self):
+        with pytest.raises(ValueError, match="tracking.servo_input"):
+            build_config_from_yaml({"tracking": {"servo_input": "magic"}})
 
     def test_build_config_from_yaml_data(self):
         yaml_data = {

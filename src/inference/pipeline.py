@@ -373,7 +373,17 @@ class TrackingPipeline:
             ts.last_locked_timestamp_ns = record.timestamp_ns
 
             current_time_s = record.timestamp_ns / 1e9
-            servo_filtered_pixel = self._servo_ema_pixel(filtered_pixel, current_time_s)
+            servo_source_pixel = filtered_pixel
+            if self._tracking_config.servo_input == "measurement":
+                # Steer from the detection itself. With the camera on the gimbal the
+                # Kalman velocity state is relative to a moving camera, so its position
+                # lags whenever the gimbal accelerates and its innovation gate then
+                # rejects the (correct) detections; feeding that estimate back biases
+                # the error and makes the gimbal hunt. The controller integrates a
+                # rate, so a single stray detection moves the command by only a
+                # fraction of a degree and is undone on the next frame.
+                servo_source_pixel = measurement_pixel
+            servo_filtered_pixel = self._servo_ema_pixel(servo_source_pixel, current_time_s)
             servo_angles = cs.compute_angles(servo_filtered_pixel)
             servo_angular_velocity = cs.compute_angular_velocity(
                 servo_filtered_pixel,

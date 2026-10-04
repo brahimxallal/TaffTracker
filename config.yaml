@@ -124,16 +124,20 @@ gimbal:
   tilt_limit_deg: 73.0  # Calibrated: mechanical range -20°..+80°, center at +24° → ±44°
   kp: 3.5               # Approach gain (°/s per ° error)
   ki: 0.0               # Reserved (unused in incremental controller)
-  kd: 0.2               # Stability-first: lower damping spike during noisy detections
+  kd: 0.0               # Was 0.2. The servo path now steers from the raw detection and the delay-compensated
+                        # loop needs no derivative term, which would only turn pixel noise into command jitter.
   deadband_deg: 0.65    # Precision preset: tighter aim deadband for laser-on-target tracking
   integral_decay_rate: 0.2  # Gentle integral bleed inside deadband (/s)
   slew_limit_dps: 125.0 # Precision preset: let the gimbal catch moving targets faster
-  tilt_scale: 0.35      # Tilt ego-motion feedback is stronger than pan
+  tilt_scale: 0.6       # Was 0.35 (damped tilt hunting that came from the lagging Kalman estimate in the loop)
   velocity_feedforward_gain: 0.0  # Disabled until lock is stable
-  kp_far: 2.6            # kp when |error| > gain_schedule_threshold_deg
-  kp_near: 1.0           # kp when |error| <= gain_schedule_threshold_deg
+  kp_far: 4.0            # kp when |error| > gain_schedule_threshold_deg (was 2.6)
+  kp_near: 2.5           # kp when |error| <= gain_schedule_threshold_deg (was 1.0)
+                         # Higher gains are safe because servo_control.latency_comp_* removes the loop delay;
+                         # with latency_comp_delay_s: 0 go back to 2.6 / 1.0.
   gain_schedule_threshold_deg: 4.0
   predictive_lead_s: 0.035  # Small lead to compensate camera+inference+servo delay while moving
+                            # (ignored while servo_control.latency_comp_delay_s > 0; the compensation supplies the lead)
 
 
 # --- Models ---
@@ -189,6 +193,24 @@ servo_control:
   backlash_tilt_deg: 0.06
   backlash_min_step_deg: 0.35
   backlash_pulse_decay_dps: 10.0
+  # --- Delay-aware control (near-human latency) ---
+  # The camera sees where the target WAS ~0.2-0.3 s ago (exposure + stream + pipeline + servo response),
+  # so a plain integrating controller either hunts at higher gains or trails a walking target by
+  # speed/kp degrees (~12 deg at 30 deg/s). Two corrections remove that, see src/output/latency_compensation.py:
+  #   * in-flight compensation: motion already commanded but not yet visible is subtracted from the error;
+  #   * absolute-velocity feedforward: the target's own angular speed (camera motion added back) leads the command.
+  # latency_comp_delay_s is the command-to-visible-effect delay, in the frame-timestamp clock. Stable for roughly
+  # 0.25-0.40 s in simulation across 40-250 ms cameras, 30/60 fps and slow servos. Raise it (0.35-0.40) if the
+  # gimbal oscillates around a moving target; lower it (0.25) if it feels sluggish. 0 turns everything off and
+  # restores the previous controller (also restore tracking.servo_input: kalman and the gimbal values noted there).
+  # Tradeoff: with no lag the gimbal also cannot know the target stopped until it sees it, so it overshoots by about
+  # 0.25 s x target speed. latency_comp_velocity_ff_gain 0.8-0.9 trades some lag for a softer stop.
+  latency_comp_delay_s: 0.30
+  latency_comp_smith_gain: 1.0
+  latency_comp_velocity_ff_gain: 1.0
+  latency_comp_velocity_tau_s: 0.18          # Velocity estimator time constant; lower reacts faster but tolerates less delay error
+  latency_comp_velocity_deadband_dps: 3.0    # Feedforward ignores target speeds below this (noise at rest)
+  latency_comp_velocity_max_dps: 150.0
 
 # --- Intelligent Search / Balayage ---
 search:
@@ -236,6 +258,11 @@ tracking:
   tracker_match_threshold: 0.30  # ByteTrack IoU match threshold; lower resists ID churn during gimbal motion
   tracker_track_threshold: 0.30  # ByteTrack high-confidence split
   tracker_birth_min_hits: 2      # Promote after 2 hits so reacquire is quicker
+  # Where the gimbal controller takes its target position from: "measurement" = the detection itself (1 Euro filtered);
+  # "kalman" = the Kalman estimate. With the camera on the gimbal the Kalman velocity is relative to a moving camera,
+  # so the estimate lags whenever the gimbal accelerates and the innovation gate then rejects correct detections
+  # (5-8% of locked frames on the live rig). Steering from the detection removes that lag and the resulting hunting.
+  servo_input: measurement
   egomotion_compensation_enabled: false  # Track actual current image position; avoids servo-induced Kalman stalls
   inference_schedule:
     detector_skip_enabled: true
