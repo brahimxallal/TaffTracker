@@ -151,6 +151,13 @@ class TrackingConfig:
     tracker_track_threshold: float = 0.40
     tracker_birth_min_hits: int = 2
     egomotion_compensation_enabled: bool = True
+    # Which pixel feeds the servo path: ``kalman`` (legacy: the Kalman position) or
+    # ``measurement`` (the detection itself, still 1 Euro filtered). The Kalman
+    # velocity state is relative to a camera that is itself moving, so its position
+    # lags whenever the gimbal accelerates and its innovation gate then rejects
+    # correct detections; fed back, that biases the error the controller sees and
+    # makes the gimbal hunt.
+    servo_input: Literal["kalman", "measurement"] = "kalman"
     postprocess: PostprocessConfig = field(default_factory=PostprocessConfig)
     kalman: KalmanConfig = field(default_factory=KalmanConfig)
     adaptive: AdaptiveConfig = field(default_factory=AdaptiveConfig)
@@ -317,6 +324,20 @@ class ServoControlConfig:
     backlash_tilt_deg: float = 0.0
     backlash_min_step_deg: float = 0.08
     backlash_pulse_decay_dps: float = 3.0
+    # Delay-aware control (0 keeps the legacy controller bit-for-bit; config.yaml
+    # turns it on). ``latency_comp_delay_s`` is the time between a command leaving
+    # the host and the camera frame that first shows it arriving back (camera +
+    # stream + servo response; the PC pipeline age is added separately). It need
+    # not be exact: the shipped gains tolerate roughly -0.1 s / +0.25 s of error.
+    # With it on, the legacy relative-velocity lead/feedforward are replaced by
+    # in-flight compensation (``smith_gain``) and an absolute-velocity feedforward
+    # (``velocity_ff_gain``) — see :mod:`src.output.latency_compensation`.
+    latency_comp_delay_s: float = 0.0
+    latency_comp_smith_gain: float = 1.0
+    latency_comp_velocity_ff_gain: float = 1.0
+    latency_comp_velocity_tau_s: float = 0.18
+    latency_comp_velocity_deadband_dps: float = 3.0
+    latency_comp_velocity_max_dps: float = 150.0
 
 
 @dataclass(frozen=True)

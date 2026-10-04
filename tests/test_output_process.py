@@ -4,6 +4,7 @@ import logging
 import multiprocessing as mp
 import threading
 from math import degrees, radians
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 import pytest
@@ -21,6 +22,7 @@ from src.output.auto_comm import AutoCommTransport
 from src.output.diagnostics import get_transport_status as _get_transport_status
 from src.output.process import OutputProcess
 from src.output.serial_comm import SerialComm
+from src.output.tracking_error import TrackingErrorStats
 from src.shared.protocol import (
     FLAG_FAST_MOTION,
     FLAG_LASER_ON,
@@ -1267,3 +1269,92 @@ def test_run_loop_fps_logging_triggers_at_300(monkeypatch) -> None:
     # After 300 frames, counter resets to 0, then +1 more = 1
     assert proc._frames_processed == 1
     layout.cleanup()
+
+
+@pytest.mark.unit
+def test_run_loop_reports_the_tracking_error_while_locked(monkeypatch, caplog) -> None:
+    layout, write_index = SharedRingBuffer.create((4, 4, 3), num_slots=2)
+    result_queue = mp.Queue()
+    proc = OutputProcess(
+        layout=layout.layout,
+        write_index=write_index,
+        result_queue=result_queue,
+        shutdown_event=mp.Event(),
+        error_queue=mp.Queue(),
+        mode="camera",
+        camera_config=CameraConfig(width=4, height=4, fps=30),
+        comm_config=CommConfig(enabled=False),
+        tracking_config=TrackingConfig(),
+        flags=RuntimeFlags(headless=True),
+    )
+    for i in range(301):  # the periodic log fires every 300 frames
+        result_queue.put(
+            _make_message(
+                filtered_angles=(radians(2.0), 0.0),
+                servo_angles=(radians(2.0), 0.0),
+                frame_id=i,
+            )
+        )
+    result_queue.put(None)
+    monkeypatch.setattr(
+        "src.output.process.SharedRingBuffer.attach", lambda layout, wi: MagicMock()
+    )
+    write_summary = MagicMock()
+    monkeypatch.setattr(proc, "_write_metrics_summary", write_summary)
+
+    with caplog.at_level(logging.INFO, logger="output"):
+        proc.run()
+
+    assert "Tracking error while locked: p50 2.0 deg | p95 2.0 deg | max 2.0 deg (n=300)" in (
+        caplog.text
+    )
+    stats = write_summary.call_args.args[-1]
+    assert isinstance(stats, TrackingErrorStats)
+    assert stats.summary() is not None
+    assert stats.summary().count == 301  # type: ignore[union-attr]
+    layout.cleanup()
+
+
+@pytest.mark.unit
+class TestObserveTrackingError:
+    @staticmethod
+    def _observe(message: TrackingMessage, *, manual: int | None = None) -> TrackingErrorStats:
+        proc = _make_proc()
+        if manual is not None:
+            proc._manual_mode = SimpleNamespace(value=manual)  # type: ignore[assignment]
+        stats = TrackingErrorStats()
+        proc._observe_tracking_error(stats, message)
+        return stats
+
+    def test_records_the_combined_pan_and_tilt_error_in_degrees(self) -> None:
+        stats = self._observe(_make_message(servo_angles=(radians(3.0), radians(4.0))))
+
+        summary = stats.summary()
+        assert summary is not None
+        assert summary.count == 1
+        assert summary.max_deg == pytest.approx(5.0)
+
+    def test_falls_back_to_the_filtered_angles_without_servo_angles(self) -> None:
+        stats = self._observe(_make_message(servo_angles=None, filtered_angles=(radians(2.0), 0.0)))
+
+        summary = stats.summary()
+        assert summary is not None
+        assert summary.max_deg == pytest.approx(2.0)
+
+    def test_skips_planned_prediction_frames(self) -> None:
+        stats = self._observe(
+            _make_message(state_source="prediction", servo_angles=(radians(2.0), 0.0))
+        )
+
+        assert stats.summary() is None
+
+    def test_skips_frames_without_angles(self) -> None:
+        stats = self._observe(_make_message(servo_angles=None, filtered_angles=None))
+
+        assert stats.summary() is None
+
+    def test_skips_manual_mode(self) -> None:
+        message = _make_message(servo_angles=(radians(2.0), 0.0))
+
+        assert self._observe(message, manual=1).summary() is None
+        assert self._observe(message, manual=0).summary() is not None
