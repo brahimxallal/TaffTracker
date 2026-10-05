@@ -6,6 +6,8 @@ stubs (``firmware/esp32s3_gimbal/host_tests/stubs``) and run under AddressSaniti
 * USB frame parser - crafted and random garbled byte streams must never overrun the frame buffer,
   and the parser must resynchronise on the next valid packet.
 * Relay fail-safe - the relay must be released when the host stops sending.
+* WiFi join diagnostics - a failed join must log its reason code, name and hint, keep retrying,
+  and call out a static IP that DHCP overrode, without ever logging the SSID or password.
 
 The tests are skipped when no C compiler (or no sanitizer runtime) is available, so they never
 block a CPU-only or Windows development machine. On CI (``CI=true``) that is an error instead, so
@@ -93,6 +95,13 @@ def control_harness(tmp_path_factory: pytest.TempPathFactory) -> Path:
     )
 
 
+@pytest.fixture(scope="module")
+def wifi_harness(tmp_path_factory: pytest.TempPathFactory) -> Path:
+    return _compile(
+        tmp_path_factory.mktemp("fw_wifi"), "harness_wifi.c", "COMM_TASK_C", "comm_task.c"
+    )
+
+
 def test_usb_parser_decodes_valid_frames_and_recovers_from_noise(usb_harness: Path) -> None:
     result = _run(usb_harness, "valid")
 
@@ -119,3 +128,12 @@ def test_relay_is_released_when_host_goes_silent(control_harness: Path) -> None:
 
     assert result.returncode == 0, result.stdout + result.stderr
     assert "RESULT: PASS" in result.stdout
+
+
+def test_wifi_join_failures_are_logged_with_reason_and_retried(wifi_harness: Path) -> None:
+    """Also asserts the SSID/password canaries compiled into the harness never reach a log line."""
+    result = _run(wifi_harness)
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "RESULT: PASS (0 failing)" in result.stdout
+    assert " FAIL" not in result.stdout

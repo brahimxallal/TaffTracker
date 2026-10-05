@@ -161,6 +161,7 @@ On boot the firmware loads saved NVS offsets when present, otherwise it uses com
 - `Error: Unable to find platform 'espressif32'` → `pio pkg install -g --platform espressif32`
 - Whitespace in your Windows user path breaks PlatformIO → set `PLATFORMIO_CORE_DIR=C:/pio` in your shell before `pio run`.
 - ESP32 reboots in a loop → check servo power supply is separate from the USB 5 V rail.
+- Gimbal won't join WiFi → read `pio device monitor` over USB. Every failed join logs `WiFi disconnected: reason=<code> (<NAME>)` plus a one-line hint, for example `NO_AP_FOUND` (SSID not seen: check the name, that the router's 2.4 GHz WiFi is on, and channel 1-11) or `AUTH_FAIL` (most likely a wrong password). The `WiFi config:` line shows only the SSID and password lengths, never the values.
 
 ---
 

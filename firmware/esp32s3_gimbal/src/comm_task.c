@@ -1,6 +1,8 @@
 #include "comm_task.h"
 #include "config.h"
+#include "wifi_diag.h"
 
+#include <stdio.h>
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -376,17 +378,44 @@ esp_err_t comm_usb_start(void)
 static EventGroupHandle_t s_wifi_event_group;
 #define WIFI_CONNECTED_BIT BIT0
 
+/* Why the last join attempt failed (0 = none yet) and how many attempts have failed since the
+ * station last had an IP. Written by the event handler, read by the UDP task's heartbeat. */
+static volatile uint8_t  s_last_disc_reason;
+static volatile uint32_t s_disc_count;
+
 static void wifi_event_handler(void *arg, esp_event_base_t base,
                                int32_t event_id, void *event_data)
 {
     if (base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
-        ESP_LOGW(TAG, "WiFi disconnected, reconnecting in 1s...");
+        const wifi_event_sta_disconnected_t *dis = (const wifi_event_sta_disconnected_t *)event_data;
+        const uint8_t reason = (dis != NULL) ? dis->reason : 0;
+        const bool changed = (reason != s_last_disc_reason);
+        s_last_disc_reason = reason;
+        s_disc_count++;
+        /* The hint is long: print it on the first failure, when the reason changes and every
+         * 30th attempt, so the 1 Hz retry loop does not bury the log. */
+        if (changed || (s_disc_count % 30u) == 1u) {
+            ESP_LOGW(TAG, "WiFi disconnected: reason=%u (%s), attempt %lu. %s Retrying in 1s...",
+                     (unsigned)reason, wifi_reason_name(reason), (unsigned long)s_disc_count,
+                     wifi_reason_hint(reason));
+        } else {
+            ESP_LOGW(TAG, "WiFi disconnected: reason=%u (%s), attempt %lu. Retrying in 1s...",
+                     (unsigned)reason, wifi_reason_name(reason), (unsigned long)s_disc_count);
+        }
         xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
         vTaskDelay(pdMS_TO_TICKS(1000));
         esp_wifi_connect();
     } else if (base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t *event = (ip_event_got_ip_t *)event_data;
-        ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
+        char ip[16];
+        snprintf(ip, sizeof ip, IPSTR, IP2STR(&event->ip_info.ip));
+        ESP_LOGI(TAG, "Got IP: %s (after %lu failed attempts)", ip, (unsigned long)s_disc_count);
+        if (WIFI_STATIC_IP[0] != '\0' && strcmp(ip, WIFI_STATIC_IP) != 0) {
+            ESP_LOGW(TAG, "A static IP %s was configured but the station got %s: the tracker "
+                          "(comms.udp_host) will not find this board until they match.",
+                     WIFI_STATIC_IP, ip);
+        }
+        s_disc_count = 0;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
 }
@@ -448,7 +477,10 @@ static void udp_rx_task(void *arg)
         if (bits & WIFI_CONNECTED_BIT) {
             break;
         }
-        ESP_LOGW(TAG, "WiFi not connected yet; UDP RX still waiting");
+        ESP_LOGW(TAG, "WiFi not connected yet (last reason %u %s, %lu failed attempts); "
+                      "UDP RX still waiting",
+                 (unsigned)s_last_disc_reason, wifi_reason_name(s_last_disc_reason),
+                 (unsigned long)s_disc_count);
     }
 
     int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
@@ -490,11 +522,26 @@ static void udp_rx_task(void *arg)
     }
 }
 
+/* Log what WiFi configuration this build carries. Lengths only: the SSID and password must never
+ * reach the serial log, which ends up pasted into chats and bug reports. */
+static void wifi_log_config(const char *ssid, const char *pass, const char *static_ip)
+{
+    if (ssid[0] == '\0') {
+        ESP_LOGW(TAG, "No WiFi SSID was compiled in (firmware/esp32s3_gimbal/wifi_secrets.env "
+                      "missing or empty when this build was made); WiFi cannot join.");
+    }
+    ESP_LOGI(TAG, "WiFi config: ssid_len=%u pass_len=%u ip=%s",
+             (unsigned)strlen(ssid), (unsigned)strlen(pass),
+             static_ip[0] != '\0' ? static_ip : "DHCP");
+}
+
 esp_err_t comm_wifi_start(void)
 {
     s_wifi_event_group = xEventGroupCreate();
 
     /* NVS is already initialized by comm_nvs_init() in app_main */
+
+    wifi_log_config(WIFI_SSID, WIFI_PASS, WIFI_STATIC_IP);
 
     esp_err_t err;
 
@@ -537,7 +584,7 @@ esp_err_t comm_wifi_start(void)
         return err;
     }
 
-    ESP_LOGI(TAG, "WiFi STA connecting to %s (PS=NONE)...", WIFI_SSID);
+    ESP_LOGI(TAG, "WiFi STA connecting (PS=NONE)...");
 
     BaseType_t ret = xTaskCreatePinnedToCore(
         udp_rx_task, "udp_rx", 4096, NULL, 5, NULL, 0 /* Core 0 */
