@@ -8,6 +8,12 @@ typedef enum { WIFI_IF_STA = 0 } wifi_interface_t;
 typedef enum { WIFI_MODE_STA = 1 } wifi_mode_t;
 typedef enum { WIFI_PS_NONE = 0 } wifi_ps_type_t;
 enum { WIFI_EVENT_STA_DISCONNECTED = 5 };
+typedef struct {
+    uint8_t ssid[32];
+    uint8_t ssid_len;
+    uint8_t bssid[6];
+    uint8_t reason;
+} wifi_event_sta_disconnected_t;
 static inline esp_err_t esp_wifi_init(const wifi_init_config_t *c) { (void)c; return ESP_OK; }
 static inline esp_err_t esp_wifi_set_mode(wifi_mode_t m) { (void)m; return ESP_OK; }
 static inline esp_err_t esp_wifi_set_config(wifi_interface_t i, wifi_config_t *c) { (void)i; (void)c; return ESP_OK; }
